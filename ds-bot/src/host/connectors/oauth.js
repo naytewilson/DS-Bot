@@ -12,6 +12,7 @@ import {
   registerClient,
   IssuerMismatchError,
 } from '@modelcontextprotocol/client'
+import { BRAND } from '../../shared/brand.js'
 
 const TIMEOUT_MS = 20_000
 // The loopback port the client-metadata document at this address may name.
@@ -76,7 +77,7 @@ export async function resolveClient(entry, discovery, redirectUri, fixedPort, st
   }
   if (typeof metadata?.registration_endpoint === 'string') {
     const clientMetadata = {
-      client_name: 'DS Bot',
+      client_name: BRAND,
       redirect_uris: [redirectUri],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],

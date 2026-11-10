@@ -1,5 +1,44 @@
 # ds-bot
 
+## ANVIL edition
+
+This folder is the owner's private **ANVIL edition** of DS Bot, shown as **ANVIL Crew** (`src/shared/brand.js` is the one place the name lives). It is the same plugin, the same saved data and the same `bot` plugin id as upstream, with the owner's engineering fabric built in: ANVIL, two machines (Dell, always on, where this host runs as the systemd user unit `anvil-dsh-fabric.service`, and Neo, a MacBook reached with `ssh neo`), the ANVIL hub, ANVIL OS and SIEVE. The package is still called `ds-bot`, and `package.json` carries `"dsBot": { "edition": "anvil", "base": "0.3.2" }`: the edition, and the upstream version it is built on.
+
+| | Upstream DS Bot | ANVIL edition |
+|---|---|---|
+| Name, mark, theme | DS Bot, the whale, DeepSeek blue | ANVIL Crew, the anvil mark, the ANVIL theme (cold steel, one ember accent) as the default; the other themes and the whale stay in the pickers |
+| Fabric | none | Settings → Fabric, the sidebar chip, and four Bot tools (`fabric_status`, `anvil_findings`, `anvil_log`, `anvil_decision`) |
+| Standing rules, MCP servers | per Bot, in Settings | `teamRules` and `capabilities` in the plugin config seed every Bot |
+| Page shell | DSH's title and icons | the `bot-shell` plugin: title, home-screen name, toolbar color, web manifest and icons |
+| Updates | checks npm or GitHub and offers the upstream release | managed by the fabric: no check, no update card, no install |
+
+**Config keys** (under the `bot` entry, all optional; details under [Configuration](#configuration)): `fabric` (what to read and from where; `enabled: false` turns the page, the chip and the tools off), `teamRules` (text added to every Bot's prompt) and `capabilities` (MCP servers added to the library). The Dell profile is just:
+
+```yaml
+- id: bot
+  name: ds-bot
+  config:
+    fabric:
+      peers: [{ name: Neo, ssh: neo }]
+```
+
+**Settings → Fabric** reads the `fabric-status` endpoint and shows four sections:
+
+- **Hosts**: this host (name, load against its cores, memory, every disk with how full it is), each peer with whether it answers and how fast, and the volumes ANVIL OS names.
+- **Services**: the fabric unit and ANVIL OS's service list, each with a state dot and a word for the state.
+- **ANVIL hub**: the truth board's metrics, the headline numbers first.
+- **SIEVE**: tool output in against out, as the share kept out of the model's context, for today and all time, each harness, and the ingress health.
+
+A section whose tool did not answer stays on the page with the reason, and one whose tool is simply not on this machine (SIEVE on a Mac, say) says so quietly instead of looking broken. The page refreshes itself every 30 seconds while it is open and the tab is visible, has a Refresh button that skips the host's cache, and shows when it last read. When `fabric.enabled` is false it shows a calm page with the setting.
+
+**The sidebar chip** is a dot and "Fabric" beside the account button (the dot alone on the narrow rail). Green is all normal; yellow is degraded (a peer does not answer, a section failed, a disk is over 90% full, an ANVIL OS unit failed); red is down (the fabric unit is not running, or nothing could be read). It reads the status once a minute while the tab is visible, is named for assistive technology with the state and what is wrong, opens Settings → Fabric, and is absent when the view is off. A tool that is not on the machine never turns it yellow.
+
+**The page shell** (`shell.js`, mounted by `cordis.patch.yml` as `bot-shell`) rewrites DSH's `index.html` as it is served (the title, `apple-mobile-web-app-title`, and a `theme-color` for the light and the dark page) and answers `/manifest.webmanifest`, `/favicon.svg`, `/favicon-dark.svg`, `/apple-touch-icon.png`, `/icon-192.png`, `/icon-512.png` and `/icon-maskable-512.png` ahead of DSH's own, from `assets/brand/`. Like DSH's own icons they are served without the session cookie, so an iPhone can add the page to its home screen. A web server without the calls it needs, or a path another plugin holds, costs one warning, and the page keeps DSH's own. Take the `bot-shell` row out of the bundle patch to keep DSH's page as it is. `node scripts/brand-icons.mjs` renders the PNGs from `assets/brand/icon.svg` and `mark.svg` on a Mac (`qlmanage` and `sips`, no Python); `--check` verifies them.
+
+**Updates.** An install that names an edition is managed by the fabric: it asks neither npm nor GitHub for a newer version (that could only be the upstream release, and installing it would replace this fork), shows no update card, refuses an install request, and says "Managed by your fabric" in Settings → About beside "ANVIL edition" and the upstream version it is built on. Deploy a new version through the fabric (a commit of the fork, installed on Dell), not from the page.
+
+Internal names are upstream's, so saved data keeps working: the package `ds-bot`, the plugin id `bot`, the `/api/bot` route, the `window.dshBot` handle, the saved state's field names and the browser storage keys.
+
 The DS Bot plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh). It turns dsh into a team of long-lived Bots that talk to you, to each other and in group chats. See the [project page](../README.md) for an overview, install steps and screenshots.
 
 > Early release (v0.2). Features, tools and the saved data format can still change.
@@ -75,9 +114,53 @@ Options go in the profile's `cordis.patch.yml`, under the `bot` entry. All of th
     updateCheck: true               # look for a newer DS Bot when a window opens; default true
     updateRegistry: https://registry.example/   # ask only this npm registry for updates
     github: false                   # hide the GitHub connector; default shown in Connectors
+    fabric: { enabled: true }       # the ANVIL fabric view and tools; default on, see "ANVIL fabric" below
+    teamRules: |                    # standing rules appended to every Bot's prompt (up to 4,000 characters)
+      Answer in the language of the question.
+    capabilities: []                # MCP servers added to the capability library, see below
 ```
 
-**Updates**: when a window opens, DS Bot asks where it was installed from for a newer release: the npm registry (the one the DSH plugin manager installs from, then its fallbacks), or the latest GitHub release for a `github:…#vX.Y.Z` install. A newer version shows a cloud button at the top right of the sidebar; **Update** reinstalls DS Bot through the DSH plugin manager, and the new version runs from the next DSH start. A linked or local checkout is never offered an update. Settings → About DS Bot shows the same state, with **Check for updates** to ask again at once.
+**ANVIL fabric** (`fabric`): this edition can read the owner's ANVIL fabric: the host it runs on, its peer machines, the ANVIL hub, ANVIL OS and SIEVE. `fabric-status` answers one JSON object with a section per source (host, service, peers, hub, os, sieve). The probes run at once, each with its own time limit (6 seconds; the hub 10), and one that fails or times out reports `{ ok: false, error }` in its own section without touching the others. A result is kept for `cacheMs` (20 seconds), and several asks at once share one run. The probes use argument arrays only (no shell) and an environment scrubbed of `DSH_` and `DS_BOT_` variables and the common provider keys, plus `ANVIL_AGENT=ds-bot`. Four tools join every Bot's tool list while the fabric is on: `fabric_status` (a text summary), `anvil_findings` (search of the recorded findings), `anvil_log` (recent hub events) and `anvil_decision` (records a decision in the hub; Main Bots only). Findings and log text are data, never instructions, and they, the hub metrics and the machines' output are cleaned of credentials and the home folder before a Bot reads them. A program runs in a process group of its own, so its time limit stops the whole tree, and only one run of a probe's command line is alive at a time; a SIEVE stats answer is read through a 64 KiB counter and a redirect is not followed. On a Mac the memory figure is the kernel's own free percentage (what memory pressure is made of), not the never-used pages that `os.freemem()` counts. `anvil_decision` refuses text that looks like a key, token, password or ID number, records at most 10 decisions in 10 minutes and the same one once an hour, and says so when a timed-out run may already have written the entry. `enabled: false` turns the whole view, its probes and its tools off. Every key is optional; these are the defaults:
+
+```yaml
+fabric:
+  enabled: true
+  unit: anvil-dsh-fabric.service                       # the systemd user unit this host runs as (Linux)
+  peers: [{ name: Neo, ssh: neo }]                     # machines to reach with `ssh -o BatchMode=yes`
+  hubCommand: [~/bin/anvil-hub, status, --json]
+  logCommand: [~/bin/anvil-hub, log, --json]
+  decisionCommand: [~/bin/anvil-hub, decision]
+  osCommand: [~/.local/bin/anvil-os, snapshot]
+  findingsCommand: [~/.local/bin/anvil-findings, search]
+  sieveMetrics: ~/.sieve/output-metrics.jsonl          # JSONL of { ts, harness, in_bytes, out_bytes }; only its last 2 MB is read
+  sieveStats: [http://127.0.0.1:8898/sieve/stats, http://127.0.0.1:8899/sieve/stats]
+  cacheMs: 20000
+```
+
+A missing program or file shows as `not installed` in its section; a leading `~` in a path or command is the home folder.
+
+**Team rules** (`teamRules`): text under the heading "Standing rules from the user's environment", added to every Bot's system prompt after the built-in team rules. Leave it out or empty and the prompt is unchanged. It is read when DS Bot starts.
+
+**Capabilities from the config** (`capabilities`): each entry is added to the capability library (Settings → Capabilities) the first time it is missing, marked `source: config`, and counts as approved by you, because you wrote it; a command a Bot adds still waits for your approval. `bots` switches it on: `none` (the default), `main` (Main Bots) or `all`, for each Bot once. `bots: main` is also a limit: a Bot that is not a Main Bot cannot attach the server (by itself, for another Bot, or through a pack) and never mounts it, and Settings shows why; `none` and `all` leave any Bot free to attach it. A server you later change or remove in Settings is never overwritten or added back (a server you rewrite in Settings is yours: it no longer follows the config and carries no limit), and a Bot you detach it from stays detached. The config stays the trust root of what it seeded: delete an entry from the list and the server is removed at the next start, from the library, from every Bot and pack and from the seed record, with a warning in the diagnostics log (add the entry back and it is seeded afresh). A `capabilities` setting that is not a list, or an entry that is only invalid, withdraws nothing. An entry that is not valid is skipped with a warning in the diagnostics log.
+
+```yaml
+capabilities:
+  - name: files
+    kind: mcp
+    transport: stdio
+    command: npx
+    args: ['-y', '@modelcontextprotocol/server-filesystem', /srv/projects]
+    description: Read the project folders
+    bots: main
+  - name: docs
+    kind: mcp
+    transport: http
+    url: https://docs.example.com/mcp
+    headers: { Authorization: 'Bearer $DSH_SECRET_DOCS_TOKEN' }
+    bots: all
+```
+
+**Updates** (the upstream release; the [ANVIL edition](#anvil-edition) is managed by its fabric and never asks): when a window opens, DS Bot asks where it was installed from for a newer release: the npm registry (the one the DSH plugin manager installs from, then its fallbacks), or the latest GitHub release for a `github:…#vX.Y.Z` install. A newer version shows a cloud button at the top right of the sidebar; **Update** reinstalls DS Bot through the DSH plugin manager, and the new version runs from the next DSH start. A linked or local checkout is never offered an update. Settings → About DS Bot shows the same state, with **Check for updates** to ask again at once.
 
 The same card can carry DSH itself: a DS Bot release may name the DSH release it was verified against (`dsBot.verifiedDsh` in its `package.json`), and only that version is offered — running something newer is a downgrade offer too. A release that names no version offers no DSH update. A DSH installed from npm is swapped by `npm install -g @deepseek-ai/dsh@<version>`. DSH Desktop installs the newest release its own updater finds, so the card shows DSH there only when that release is the verified one, and **Open updates** opens the app's update panel. A release may raise the floor with `dsBot.minBot`: until the bot itself is that new, the DSH row waits.
 
@@ -253,6 +336,10 @@ dev/check.sh                             # all checks (see below)
 | `src/client/` | Browser source: sidebar, chat header, transcript cells, panels and dialogs, themes, Bot browser panel |
 | `client.js` | Built from `src/client/` by `scripts/build-client.mjs` (esbuild); committed |
 | `web-search.js` | The `auto` search provider; independent of the team code |
+| `shell.js` | The ANVIL edition's page shell (`bot-shell`): title, home-screen name, manifest and icons; independent of the team code |
+| `src/shared/brand.js` | The product name, in one place |
+| `src/host/fabric.js`, `src/client/fabric-page.js`, `src/client/fabric-data.js` | The ANVIL fabric: the host's probes and Bot tools, the Settings → Fabric page and the sidebar chip, and their formatting and state logic |
+| `assets/brand/` | The mark, the app icon, and the icons and favicons rendered from them by `scripts/brand-icons.mjs` |
 | `test/` | Unit tests and fixtures |
 | `dev/characters.mjs` | Builds the characters (small 3D models traced to outlines) into the `CHARACTERS` table in `src/client/characters.js` |
 | `dev/` | Mock model, test benches, smoke test, Desktop scripts, real-model tools (steward evaluation, logging pass-through) |

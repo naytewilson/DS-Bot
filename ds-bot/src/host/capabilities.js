@@ -51,8 +51,80 @@ const stringMap = (value, label) => {
   return Object.fromEntries(Object.entries(value))
 }
 
+// ---- servers named in the profile's config.capabilities ----
+
+const BOTS_CHOICES = ['none', 'main', 'all']
+// YAML reads `PORT: 8080` as a number; a setting the user wrote may say so.
+const configText = value => (typeof value === 'number' || typeof value === 'boolean' ? String(value) : value)
+const configStrings = value => (value === undefined || value === null ? [] : strings(Array.isArray(value) ? value.map(configText) : value))
+const configMap = (value, label) => {
+  if (value === undefined || value === null) return {}
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must contain text values.`)
+  return stringMap(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, configText(item)])), label)
+}
+
+// The valid entries of `config.capabilities`, in the shape the library keeps them plus `bots`
+// (who they are switched on for) and a `hash` of the definition. A bad entry is reported
+// through `warn(label, reason)` and skipped; the rest still load.
+export function parseConfiguredCapabilities(raw, warn = () => {}) {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) {
+    warn('config.capabilities', 'the setting must be a list')
+    return []
+  }
+  const entries = []
+  const names = new Set()
+  raw.forEach((value, index) => {
+    const label = typeof value?.name === 'string' && value.name !== '' ? value.name : `entry ${index + 1}`
+    try {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('an entry must be a mapping')
+      const name = validateCapabilityName(value.name)
+      if (names.has(name)) throw new Error('the name is listed twice')
+      if (value.kind !== undefined && value.kind !== 'mcp') throw new Error('only MCP servers (kind: mcp) can be configured')
+      const bots = value.bots ?? 'none'
+      if (!BOTS_CHOICES.includes(bots)) throw new Error('bots must be none, main or all')
+      const entry = { name, description: String(value.description ?? '').trim().slice(0, 2000), bots }
+      const transport = value.transport ?? (value.url !== undefined ? 'http' : 'stdio')
+      if (transport === 'stdio') {
+        const command = typeof value.command === 'string' ? value.command.trim() : ''
+        if (command === '') throw new Error('a stdio server needs a command')
+        Object.assign(entry, { transport: 'stdio', command, args: configStrings(value.args), env: configMap(value.env, 'Environment variables') })
+      } else if (transport === 'http' || transport === 'streamable-http') {
+        const url = typeof value.url === 'string' ? value.url.trim() : ''
+        let parsed
+        try { parsed = new URL(url) } catch { /* reported below */ }
+        if (parsed?.protocol !== 'https:' && parsed?.protocol !== 'http:') throw new Error('an http server needs a valid http or https url')
+        Object.assign(entry, { transport: 'streamable-http', url, headers: configMap(value.headers, 'Headers') })
+      } else {
+        throw new Error('transport must be stdio or http')
+      }
+      entry.hash = createHash('sha256').update(JSON.stringify(entry)).digest('hex').slice(0, 16)
+      names.add(name)
+      entries.push(entry)
+    } catch (error) {
+      warn(label, error.message)
+    }
+  })
+  return entries
+}
+
+// The names a config.capabilities list names, valid or not, or null when the setting is not a
+// list. An entry that is only invalid is still the user's: a typo in it must not withdraw a server.
+export function listedCapabilityNames(raw) {
+  if (raw === undefined || raw === null) return new Set()
+  if (!Array.isArray(raw)) return null
+  return new Set(raw.map(entry => (typeof entry?.name === 'string' ? entry.name.trim() : '')).filter(name => name !== ''))
+}
+
 export function install(rt) {
   const { ctx, state } = rt
+  const configured = parseConfiguredCapabilities(rt.config?.capabilities, (label, reason) => rt.warn?.('ds-bot: configured capability %s skipped: %s', label, reason))
+  const listed = listedCapabilityNames(rt.config?.capabilities)
+  // Who a configured server is for, by name: `bots: main` limits it to Main Bots. It is read from
+  // the live config and applies to the item only while the item is still the config's own, so
+  // an item the user rewrote in Settings (which drops the mark) is theirs to share as they like.
+  const botsOf = new Map(configured.map(entry => [entry.name, entry.bots]))
+  const limitedToMain = name => own(state.capabilities?.items ?? {}, name)?.source === 'config' && botsOf.get(name) === 'main'
   const agents = new Map()
   // Mounted fibers live in each Agent's own context, so they outlive this plugin unless
   // its cleanup disposes them; a strong map keeps them reachable for that.
@@ -75,6 +147,94 @@ export function install(rt) {
   const writeCheck = () => {
     const readOnly = rt.readOnly()
     if (readOnly !== undefined) throw new Error(readOnly)
+  }
+  // A server from the profile config is the user's own: it is approved, owned by no Bot, and
+  // marked `source: 'config'` until someone changes it in Settings (a save builds the item
+  // anew, without the mark).
+  const itemFromConfig = (entry, now, previous) => ({
+    name: entry.name,
+    kind: 'mcp',
+    description: entry.description,
+    createdBy: null,
+    createdAt: previous?.createdAt ?? now,
+    updatedAt: now,
+    ...(entry.transport === 'stdio'
+      ? { transport: 'stdio', command: entry.command, args: [...entry.args], env: { ...entry.env }, approved: true }
+      : { transport: 'streamable-http', url: entry.url, headers: { ...entry.headers }, approved: true }),
+    source: 'config',
+  })
+  // Adds each configured server the library has never had, and switches it on for the Bots its
+  // `bots` names, once per Bot. What was seeded is remembered by name in
+  // state.capabilities.seeded, so a server the user later removes stays removed, a Bot the user
+  // detaches it from stays detached, and an item the user edited is never overwritten. An item
+  // still marked as from the config follows the config when the definition changes.
+  // The config is the trust root of what it seeded: a server whose entry is gone from the list
+  // (removed because it was compromised or is no longer wanted) leaves the library, every Bot and
+  // every pack with it, and its record here; adding the entry again seeds it afresh. A setting
+  // that is not a list, or an entry that is only invalid, withdraws nothing.
+  // The state changes before this returns; the promise settles once it is saved.
+  const seedConfigured = () => {
+    if (stopped || rt.readOnly() !== undefined) return undefined
+    const current = state.capabilities?.items ?? {}
+    const recorded = state.capabilities?.seeded
+    const withdrawn = listed === null ? [] : Object.values(current).filter(item => item.source === 'config' && !listed.has(item.name))
+    const stale = listed === null || recorded === null || typeof recorded !== 'object' || Array.isArray(recorded) ? [] : Object.keys(recorded).filter(name => !listed.has(name))
+    if (configured.length === 0 && withdrawn.length === 0 && stale.length === 0) return undefined
+    const items = ensureLibrary()
+    if (state.capabilities.seeded === null || typeof state.capabilities.seeded !== 'object' || Array.isArray(state.capabilities.seeded)) state.capabilities.seeded = {}
+    const seeded = state.capabilities.seeded
+    const now = Date.now()
+    const filled = []
+    let changed = false
+    for (const item of withdrawn) {
+      removeItem(items, item.name)
+      rt.warn?.('ds-bot: configured capability %s is no longer in the configuration; it was removed from the library and from every Bot', item.name)
+      changed = true
+    }
+    for (const name of stale) {
+      delete seeded[name]
+      changed = true
+    }
+    for (const entry of configured) {
+      let record = own(seeded, entry.name)
+      if (record === null || typeof record !== 'object' || Array.isArray(record)) {
+        const fresh = record === undefined
+        record = seeded[entry.name] = { hash: entry.hash, bots: [] }
+        changed = true
+        if (fresh && own(items, entry.name) === undefined) items[entry.name] = itemFromConfig(entry, now)
+      } else if (own(items, entry.name)?.source === 'config' && record.hash !== entry.hash) {
+        items[entry.name] = itemFromConfig(entry, now, items[entry.name])
+        record.hash = entry.hash
+        changed = true
+      }
+      if (!Array.isArray(record.bots)) record.bots = []
+      const live = own(items, entry.name)
+      const known = record.bots.filter(id => own(state.bots, id) !== undefined)
+      if (known.length !== record.bots.length) {
+        record.bots = known
+        changed = true
+      }
+      if (live?.source !== 'config' || entry.bots === 'none') continue
+      for (const bot of Object.values(state.bots)) {
+        if (record.bots.includes(bot.id) || (entry.bots === 'main' && !rt.isMain(bot.id))) continue
+        record.bots.push(bot.id)
+        changed = true
+        bot.capabilities ??= []
+        if (bot.capabilities.includes(entry.name)) continue
+        if (bot.capabilities.length === 0) filled.push(bot)
+        bot.capabilities.push(entry.name)
+      }
+    }
+    if (!changed) return undefined
+    return rt.save()
+      .then(() => Promise.all(filled.map(bot => trackBotAgents(bot))))
+      .catch(error => rt.warn('ds-bot: saving the configured capabilities failed: %s', error))
+  }
+  // Takes an item out of the library, out of every pack and off every Bot.
+  const removeItem = (items, name) => {
+    delete items[name]
+    for (const pack of Object.values(items)) if (pack.kind === 'pack') pack.items = (pack.items ?? []).filter(child => child !== name)
+    for (const bot of Object.values(state.bots)) bot.capabilities = (bot.capabilities ?? []).filter(attached => attached !== name)
   }
   const allowedToEdit = (item, botId) => rt.isMain(botId) || item.createdBy === botId
   const usedByOthers = (name, botId) => Object.values(state.bots).some(bot => bot.id !== botId
@@ -149,9 +309,7 @@ export function install(rt) {
     const item = own(items, String(name ?? ''))
     if (!item) throw new Error(`No capability named ${name}.`)
     if (!ui) editCheck(item, botId, 'delete')
-    delete items[item.name]
-    for (const pack of Object.values(items)) if (pack.kind === 'pack') pack.items = (pack.items ?? []).filter(child => child !== item.name)
-    for (const bot of Object.values(state.bots)) bot.capabilities = (bot.capabilities ?? []).filter(attached => attached !== item.name)
+    removeItem(items, item.name)
     await rt.save()
     return true
   }
@@ -179,6 +337,11 @@ export function install(rt) {
     if (target.id !== caller.id && !rt.isMain(callerId)) throw new Error('Only a Main Bot can change another Bot’s capabilities.')
     const item = own(ensureLibrary(), String(name ?? ''))
     if (!item) throw new Error(`No capability named ${name}.`)
+    if (endpoint === 'attach' && !rt.isMain(target.id)) {
+      const members = item.kind === 'pack' ? (item.items ?? []) : [item.name]
+      const limited = members.find(limitedToMain)
+      if (limited !== undefined) throw new Error(`${limited} is limited to Main Bots by this host's configuration (bots: main); ${target.name} is not one.`)
+    }
     await setAttached(target, item.name, endpoint === 'attach')
     return { bot: target.name, attached: endpoint === 'attach' }
   }
@@ -338,12 +501,17 @@ export function install(rt) {
   const reconcileAgent = async (agent, bot) => {
     const sessionId = agent.session.id
     const desired = bot ? expandCapabilityNames(bot.capabilities, library()) : new Set()
+    // However a server reached a Bot (attached by itself, through a pack, or edited into one), a
+    // Bot outside `bots: main` never mounts it.
+    const limited = bot && !rt.isMain(bot.id) ? [...desired].filter(limitedToMain) : []
+    for (const name of limited) desired.delete(name)
     const agentMounts = mounts.get(agent) ?? new Map()
     if (desired.size > 0) mounts.set(agent, agentMounts)
     if (bot) {
       for (const name of sessionStatuses.get(bot.id)?.keys() ?? []) {
         if (!desired.has(name)) clearStatus(bot.id, name, sessionId)
       }
+      for (const name of limited) statusSet(bot.id, name, sessionId, { state: 'error', error: 'Limited to Main Bots by the configuration (bots: main)' })
     } else {
       clearSession(sessionId)
     }
@@ -371,6 +539,7 @@ export function install(rt) {
   }
   const loadInputs = async () => {
     await rt.load()
+    await seedConfigured()
     loadingSecrets += 1
     try {
       await rt.loadSecrets()
@@ -422,6 +591,7 @@ export function install(rt) {
   }
   async function ensureCapabilities(sessionId) {
     await rt.load()
+    await seedConfigured()
     const bot = botOfSession(sessionId)
     if (!bot) return
     if ((bot.capabilities ?? []).length === 0 && !mounts.get(agents.get(sessionId)?.deref())?.size) return
@@ -507,6 +677,7 @@ export function install(rt) {
     trackAgent(agent)
     try {
       await rt.load()
+      await seedConfigured()
       const bot = botOfSession(agent.session.id)
       if ((bot?.capabilities ?? []).length > 0) await prepare(agent, agent.session.id)
     } catch (error) {
@@ -515,6 +686,9 @@ export function install(rt) {
   })
   ctx.effect(() => {
     void rt.load().then(async () => {
+      // First, and synchronously up to its save: the Bots it switches a server on for join the
+      // loop below, and anything that awaits rt.load() after this finds the library whole.
+      await seedConfigured()
       for (const bot of Object.values(state.bots)) {
         if ((bot.capabilities ?? []).length > 0) await trackBotAgents(bot)
       }

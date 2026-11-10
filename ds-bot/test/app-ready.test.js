@@ -217,3 +217,16 @@ test('a whale handed over glides from where it was handed onto the Main Bot\'s a
   assert.equal(mark.style.opacity, '')
   assert.equal(mark.animations.length, 1)
 })
+
+// The default Main Bot is the anvil, and the start window's whale cannot land on it: the report
+// carries no place and no hand-off is registered, so the app's whale dives (its documented fallback).
+test('the default anvil Main Bot reports no place, and registers no hand-off', async () => {
+  const calls = []
+  const app = { ready: (...args) => { calls.push(['ready', ...args]) }, onHandoff: () => { calls.push(['onHandoff']) } }
+  for (const look of [{}, { color: 'orange', avatar: { shape: 'anvil' } }]) {
+    calls.length = 0
+    mount(avatarPage(app).TeamSidebar)(sidebarProps({ ...TEAM, byId: { main: { ...main, ...look } } }))
+    await setImmediate()
+    assert.deepEqual(calls, [['ready']], JSON.stringify(look))
+  }
+})

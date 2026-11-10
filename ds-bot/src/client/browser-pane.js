@@ -793,7 +793,7 @@ export const BROWSER_CSS = `
 .bt-browser-address input{flex:1;min-width:0;border:0;background:none;outline:none;color:var(--bt-ink);font:inherit;font-size:13px;line-height:18px;padding:0;text-overflow:ellipsis}
 .bt-browser-address input::placeholder{color:var(--bt-ink-3)}
 .bt-browser-progress{position:absolute;left:0;right:0;bottom:-1px;height:2px;overflow:hidden;pointer-events:none}
-.bt-browser-progress::after{content:"";position:absolute;inset:0;width:40%;background:var(--bt-accent,#4D6BFE);border-radius:2px;animation:bt-browser-load 1.1s cubic-bezier(.4,0,.2,1) infinite}
+.bt-browser-progress::after{content:"";position:absolute;inset:0;width:40%;background:var(--bt-accent);border-radius:2px;animation:bt-browser-load 1.1s cubic-bezier(.4,0,.2,1) infinite}
 @keyframes bt-browser-load{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
 .bt-browser-frame{position:relative;flex:1;min-height:0;background:var(--bt-main)}
 .bt-browser-frame[data-guest]{background:#fff}
@@ -805,7 +805,7 @@ export const BROWSER_CSS = `
 .bt-bcards{display:flex;flex-direction:column;gap:12px}
 .bt-bcard{position:relative;border:.5px solid var(--bt-line-2);border-radius:12px;overflow:hidden;background:var(--bt-main);animation:bt-bcard-in .24s cubic-bezier(.16,1,.3,1) both;transition:border-color .12s ease,box-shadow .12s ease}
 @keyframes bt-bcard-in{from{opacity:0;filter:blur(4px);transform:translateY(4px)}}
-.bt-bcard[data-active]{border-color:var(--bt-accent,#4D6BFE);box-shadow:0 0 0 1px var(--bt-accent,#4D6BFE)}
+.bt-bcard[data-active]{border-color:var(--bt-accent);box-shadow:0 0 0 1px var(--bt-accent)}
 .bt-bcard-shot{position:relative;display:block;width:100%;aspect-ratio:16/10;border:0;border-radius:12px 12px 0 0;background:var(--bt-hover);padding:0;cursor:pointer}
 .bt-bcard-shot:focus-visible{outline:2px solid var(--bt-accent);outline-offset:-2px}
 .bt-bcard-blank{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--bt-ink-3);font-size:12px}

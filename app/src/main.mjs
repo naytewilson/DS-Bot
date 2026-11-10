@@ -16,6 +16,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { canonicalExecPath } from './canonical-path.mjs'
 import { disk } from './copy-tree.mjs'
+import { bundledEdition, updatesManagedByEdition } from './edition.mjs'
 import { configureIdentity } from './legacy.mjs'
 import { hostPort } from './host-port.mjs'
 import { captureStdio, LogFile } from './logs.mjs'
@@ -600,7 +601,7 @@ async function startEngine(mine) {
   // update can still come when this version's Host does not start.
   if (!updatesStarted) {
     updatesStarted = true
-    updates = startUpdates()
+    updates = await startUpdates()
     updates?.subscribe((state) => { mainWindow?.webContents.send(IPC.appUpdateChanged, state) })
 
   }
@@ -1099,11 +1100,18 @@ async function runMove(to, workspace) {
 }
 
 // Windows and a Linux AppImage update themselves; macOS and a Linux deb ask to download the new
-// version. Throwaway runs check only a given feed and never ask.
-function startUpdates() {
+// version. Throwaway runs check only a given feed and never ask. An app that bundles the ANVIL
+// edition is moved by the owner's fabric: the upstream releases these updaters read would replace
+// the fork, so it checks nothing unless a feed was given on purpose.
+async function startUpdates() {
   const feed = process.env.DS_BOT_UPDATE_URL || undefined
   const throwaway = Boolean(process.env.DS_BOT_HOME)
   if (!app.isPackaged || (throwaway && feed === undefined)) return undefined
+  const edition = await bundledEdition()
+  if (updatesManagedByEdition(edition, feed)) {
+    console.log(`DS Bot: the ${edition} edition is updated by its own fabric; no update check runs`)
+    return undefined
+  }
   if (process.platform === 'darwin') {
     return watchReleases({
       current: app.getVersion(), arch: process.arch, feed, ask: throwaway ? undefined : (version) => downloadPrompt.prompt(version), open: url => electronShell.openExternal(url),

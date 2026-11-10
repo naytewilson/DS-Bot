@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   RAIL_WIDTH, RAIL_SNAP, SIDEBAR_MIN, SIDEBAR_MAX, MIN_CHAT, FALLBACK_SIDEBAR_WIDTH,
-  frameLayout, dragColumn, toggledPref, userSidebarToggle, readSidebar, writeSidebar,
+  frameLayout, dragColumn, toggledPref, switchResult, isPhone, phoneDrawerWidth, PHONE, userSidebarToggle, readSidebar, writeSidebar,
 } from '../src/client/frame-layout.js'
 import { createSource } from '../src/client/sources.js'
 import { teamActions } from '../src/client/team-actions.js'
@@ -198,8 +198,8 @@ test('openers keep a yield already given', () => {
 // form the column has; the shell's own sidebar plays no part.
 test('the left column reports the edge the full-height panes start at', () => {
   assert.equal(at(809, 280).column, 280)
-  assert.equal(at(600, 280, { pref: 'rail' }).column, RAIL_WIDTH)
-  assert.equal(at(600, 280, { drawer: true }).column, RAIL_WIDTH)
+  assert.equal(at(660, 280, { pref: 'rail' }).column, RAIL_WIDTH)
+  assert.equal(at(660, 280, { drawer: true }).column, RAIL_WIDTH)
   assert.equal(at(1400, 280, { pref: 'hidden' }).column, 0)
   assert.equal(at(1400, 340).room, 1400 - at(1400, 340).column)
 })
@@ -214,4 +214,52 @@ test('opening new chat closes the floating drawer', () => {
   actions.openNewChat('new')
   assert.equal(ui.getSnapshot().newChat, 'new')
   assert.equal(ui.getSnapshot().leftDrawer, false)
+})
+
+// ---- phone ------------------------------------------------------------------------------
+
+test('below PHONE the column takes no width: closed by default, a drawer when open, whatever the saved preference', () => {
+  assert.equal(PHONE, 640)
+  for (const pref of ['open', 'rail', 'hidden']) {
+    const closed = at(375, 280, { pref })
+    assert.deepEqual(closed, { left: 'hidden', panel: 'none', column: 0, room: 375 })
+    assert.deepEqual(at(375, 280, { pref, drawer: true }), { left: 'drawer', panel: 'none', column: 0, room: 375 })
+  }
+})
+
+test('exactly at 640 the desktop rules apply, at 639 the phone rules', () => {
+  assert.equal(at(639, 280).left, 'hidden')
+  assert.equal(at(639, 280, { pref: 'rail' }).column, 0)
+  assert.equal(at(640, 280).left, 'rail')
+  assert.equal(at(640, 280, { pref: 'rail' }).column, RAIL_WIDTH)
+  assert.equal(at(640, 280, { drawer: true }).left, 'drawer')
+  assert.equal(isPhone(639), true)
+  assert.equal(isPhone(640), false)
+  // An unmeasured viewport is not a phone.
+  assert.equal(isPhone(0), false)
+})
+
+test('on a phone a panel covers the chat when asked for and folds away otherwise, with no column beside it', () => {
+  assert.deepEqual(at(375, 280, { panel: details(false) }), { left: 'hidden', panel: 'folded', column: 0, room: 375 })
+  assert.deepEqual(at(375, 280, { panel: details(true) }), { left: 'hidden', panel: 'overlay', column: 0, room: 375 })
+  assert.deepEqual(at(375, 280, { panel: browser(true), drawer: true }), { left: 'drawer', panel: 'overlay', column: 0, room: 375 })
+})
+
+test('the phone drawer is the viewport less a gutter, up to 320px', () => {
+  assert.equal(phoneDrawerWidth(375), 319)
+  assert.equal(phoneDrawerWidth(639), 320)
+  assert.equal(phoneDrawerWidth(360), 304)
+})
+
+test('on a phone the switch opens and closes the drawer and never touches the saved preference', () => {
+  const state = { viewport: 375, pref: 'open', shown: 'open', drawer: false, panelYield: false }
+  const opened = switchResult(state)
+  assert.deepEqual(opened, { pref: 'open', drawer: true, panelYield: false })
+  assert.deepEqual(switchResult({ ...state, drawer: true }), { pref: 'open', drawer: false, panelYield: false })
+  // A saved rail or hidden desktop layout comes through untouched.
+  assert.equal(switchResult({ ...state, pref: 'rail', shown: 'rail' }).pref, 'rail')
+  assert.equal(switchResult({ ...state, pref: 'hidden' }).pref, 'hidden')
+  // Elsewhere it hides the column and brings back the one it hid, and clears the drawer and yield.
+  assert.deepEqual(switchResult({ ...state, viewport: 1400, drawer: true, panelYield: true }), { pref: 'hidden', drawer: false, panelYield: false })
+  assert.deepEqual(switchResult({ ...state, viewport: 1400, pref: 'hidden', shown: 'rail' }), { pref: 'rail', drawer: false, panelYield: false })
 })

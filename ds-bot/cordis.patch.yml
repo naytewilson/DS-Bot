@@ -7,6 +7,11 @@
     # results-page fallback (see README "Web search").
     - id: web-search-auto
       name: ds-bot/web-search
+    # The ANVIL edition's page shell: the title, the home-screen name and toolbar color, and the
+    # icons and web manifest, served ahead of DSH's own (shell.js). Take this row out to keep
+    # DSH's.
+    - id: bot-shell
+      name: ds-bot/shell
 
 # A config override replaces the whole entry config, so fetchProvider is
 # restated. A profile patch that names another searchProvider (exa, perplexity,

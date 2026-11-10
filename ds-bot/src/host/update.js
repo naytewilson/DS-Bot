@@ -2,8 +2,12 @@
 // installed from (the npm registry, or a GitHub tag for a versioned git install)
 // and, when the user asks, reinstall it through DSH's plugin manager. A new version
 // runs from the next DSH start. A linked or local checkout is never offered one.
+// A package that names an edition (package.json `dsBot.edition`) is a fork installed from the
+// owner's own commit: it is managed by the owner's fabric, so it asks nobody for a newer
+// version and installs nothing (see `managed` in install()).
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { BRAND } from '../shared/brand.js'
 
 const PKG = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
 export const OFFICIAL_REGISTRY = 'https://registry.npmjs.org/'
@@ -14,6 +18,9 @@ export const FETCH_TIMEOUT_MS = 8000
 // The first check waits until the host has settled its own start.
 const STARTUP_DELAY_MS = 15_000
 const VERSION = /^v?(\d+\.\d+\.\d+(?:-[\w.]+)?)(?:\+[\w.]+)?$/
+
+/** The edition a package.json names (`dsBot.edition`), or null for the upstream release. */
+export const editionOf = pkg => (typeof pkg?.dsBot?.edition === 'string' && pkg.dsBot.edition !== '' ? pkg.dsBot.edition : null)
 
 /** A release version without its `v` and build metadata, or null. */
 export const cleanVersion = value => VERSION.exec(String(value ?? '').trim())?.[1] ?? null
@@ -110,13 +117,18 @@ const releasesUrl = () => {
 
 export const STARS_TTL_MS = 60 * 60_000
 
-export function install(rt) {
+// `edition` is a parameter so a test can run the upstream behaviour in the edition's package.
+export function install(rt, { edition = editionOf(PKG) } = {}) {
   const { ctx, config } = rt
   const enabled = config.updateCheck !== false
   const manager = () => ctx.get?.('pluginManager')
+  // An edition is installed from the owner's own commit and moves when the owner's fabric moves
+  // it. Asking npm or GitHub would only find the upstream release, and installing that would
+  // replace the fork, so a managed install never looks and never installs.
+  const managed = edition !== null
 
   const status = {
-    name: PKG.name, current: PKG.version, latest: null, source: 'unknown', notesUrl: releasesUrl(),
+    name: PKG.name, current: PKG.version, latest: null, source: managed ? 'fabric' : 'unknown', notesUrl: releasesUrl(),
     checkedAt: 0, phase: 'idle', installed: null, error: null,
   }
   // Where the newest version was found, and the spec that installs it.
@@ -150,8 +162,11 @@ export function install(rt) {
   const view = () => ({
     name: status.name, current: status.current, latest: status.latest, source: status.source, notesUrl: status.notesUrl,
     repoUrl: repoUrl(), enabled,
+    // The edition this install is, the upstream version it is built on, and whether the
+    // fabric manages its updates (then nothing is ever available).
+    edition, base: managed ? PKG.dsBot?.base ?? PKG.version : null, managed,
     checkedAt: status.checkedAt, phase: status.phase, installed: status.installed, error: status.error,
-    available: status.phase !== 'installed' && status.phase !== 'updated' && target !== null && status.latest !== null && newer(status.latest, status.current),
+    available: !managed && status.phase !== 'installed' && status.phase !== 'updated' && target !== null && status.latest !== null && newer(status.latest, status.current),
   })
 
   // Asked only while the About page is open, so a closed page never calls GitHub.
@@ -222,7 +237,7 @@ export function install(rt) {
 
   /** Ask where the package came from for its newest version; a fresh check ignores the last answer. */
   async function check({ fresh = false } = {}) {
-    if (!enabled) return view()
+    if (managed || !enabled) return view()
     if (checking) return checking
     if (!fresh && Date.now() - status.checkedAt < CHECK_TTL_MS) return view()
     checking = runCheck().finally(() => { checking = null })
@@ -232,8 +247,9 @@ export function install(rt) {
 
   /** Start reinstalling the newest version; the answer comes back through `check`. */
   function start() {
+    if (managed) throw new Error('This install is managed by your fabric and is not updated from here')
     if (status.phase === 'installing') return view()
-    if (target === null) throw new Error('No DS Bot update is available')
+    if (target === null) throw new Error(`No ${BRAND} update is available`)
     const service = manager()
     if (typeof service?.installBundle !== 'function') throw new Error('The DSH plugin manager is not available in this profile')
     const chosen = target
@@ -305,7 +321,7 @@ export function install(rt) {
     return view()
   }
 
-  if (enabled) {
+  if (enabled && !managed) {
     ctx.effect(() => {
       const timer = setTimeout(() => { void check() }, STARTUP_DELAY_MS)
       // A pending first check never keeps the process alive.

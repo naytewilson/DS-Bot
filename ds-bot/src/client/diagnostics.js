@@ -1,6 +1,7 @@
 // What went wrong in this browser, for Settings → Feedback and the report it builds.
 // Calls whose failures the interface swallows (polls, previews) still land here.
 import { t, language } from './i18n.js'
+import { BRAND } from '../shared/brand.js'
 
 const MAX = 30
 // The same failure again within this window bumps a count instead of a new line.
@@ -77,8 +78,8 @@ export function failureLabel(code, message) {
 // GitHub refuses very long addresses; past this the diagnostics go by the clipboard.
 const URL_LIMIT = 7000
 export const WHAT_MAX = 2000
-const PASTE_NOTE = 'DS Bot copied the diagnostics to the clipboard. Paste them here.'
-const REST_NOTE = 'The recent errors do not fit in the link. DS Bot copied the diagnostics to the clipboard: paste them below this line.'
+const PASTE_NOTE = `${BRAND} copied the diagnostics to the clipboard. Paste them here.`
+const REST_NOTE = `The recent errors do not fit in the link. ${BRAND} copied the diagnostics to the clipboard: paste them below this line.`
 
 export function issueUrl(base, { what = '', diagnostics }) {
   const text = what.trim().slice(0, WHAT_MAX)

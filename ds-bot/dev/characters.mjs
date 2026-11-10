@@ -556,7 +556,20 @@ function build(model) {
   }
 }
 
-export const CHARACTERS = Object.fromEntries(Object.entries(MODELS).map(([id, model]) => [id, build(model)]))
+// Characters drawn by hand instead of modelled: flat geometry in the same 100-unit box (the
+// shade lies inside the body, the eyes are capsules on the face). They lead the table, so
+// regenerating it keeps the ANVIL edition's anvil as the picker's first character.
+const HAND_DRAWN = {
+  anvil: {
+    label: 'Anvil',
+    body: 'M6 30L40 14Q44 12 48 12H86Q95 12 95 21V39Q95 48 86 48H76V58Q76 70 89 70V80Q89 89 80 89H36Q27 89 27 80V70Q40 70 40 58V48H48C30 48 14 42 6 30Z',
+    shade: 'M86 12Q95 12 95 21V39Q95 48 86 48ZM66 48H76V58Q76 70 89 70V80Q89 89 80 89H66Z',
+    light: 'M50 13.2H84V16.5H50Z',
+    eyes: [[64, 30, 8.4, 22, -8], [82, 27, 7, 21, -10]],
+  },
+}
+
+export const CHARACTERS = { ...HAND_DRAWN, ...Object.fromEntries(Object.entries(MODELS).map(([id, model]) => [id, build(model)])) }
 
 const block = Object.entries(CHARACTERS).map(([id, character]) => `  ${id}: ${JSON.stringify(character).replace(/"(\w+)":/g, '$1:').replaceAll('"', "'")},`).join('\n')
 console.log(`export const CHARACTERS = {\n${block}\n}`)
@@ -564,7 +577,7 @@ console.log(`export const CHARACTERS = {\n${block}\n}`)
 const out = process.argv.indexOf('--preview')
 if (out > 0) {
   const colors = ['#A27952', '#FF3E51', '#FF781C', '#FFAF38', '#00C972', '#1CC3B0', '#2A92FE', '#A97EFE', '#FF5EB1', '#959595']
-  const INK = { whale: '#4D6BFE', moon: '#141416', zed: '#2D2D2D', wave: '#EC2F6B', star: '#0AA8D6', squircle: '#FF6900', hex: '#082DFF' }
+  const INK = { anvil: '#FF6B1A', whale: '#4D6BFE', moon: '#141416', zed: '#2D2D2D', wave: '#EC2F6B', star: '#0AA8D6', squircle: '#FF6900', hex: '#082DFF' }
   const INK_DARK = { moon: '#F1F2F4', zed: '#D6D6DA' }
   let serial = 0
   const mark = (c, color, size) => {

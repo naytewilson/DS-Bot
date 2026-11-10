@@ -2,6 +2,7 @@
 // in, see the latest errors, and download the log. Also the toast for actions that
 // fail away from any form (menus, the palette).
 import { createElement as h, useEffect, useState } from 'react'
+import { BRAND } from '../shared/brand.js'
 import { clearClientErrors, clientErrors, clientFacts, failureLabel, issueUrl, WHAT_MAX } from './diagnostics.js'
 import { dateLocale, t } from './i18n.js'
 import { CloseIcon } from './icons.js'
@@ -10,6 +11,9 @@ import { reserveWindow } from './open-window.js'
 
 export const FeedbackIcon = () => h('svg', { width: 15, height: 15, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
   h('path', { d: 'M4 4.5h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H9l-3.5 3v-3H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z' }), h('path', { d: 'M10 7v2.6M10 11.4h.01' }))
+
+// The saved log carries the edition's name: "ANVIL Crew" saves as anvil-crew-diagnostics.log.
+export const diagnosticsFileName = (brand = BRAND) => `${brand.toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-+|-+$/gu, '') || 'bot'}-diagnostics.log`
 
 function download(name, text) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
@@ -38,7 +42,7 @@ function entrySummary(entry) {
   return entry.text
 }
 
-const SOURCES = { turn: 'Model call', host: 'DS Bot', api: 'DS Bot', browser: 'This window' }
+const SOURCES = { turn: 'Model call', host: '{brand}', api: '{brand}', browser: 'This window' }
 
 // Where the new issue opens; `go(url)` tells whether it did.
 const issueWindow = reserveWindow
@@ -79,7 +83,7 @@ export function FeedbackPage({ actions, run, Section, Row }) {
     }))
   }
   const downloadLog = () => run(actions.diagnosticsLog().then((text) => {
-    download('ds-bot-diagnostics.log', text || 'No entries.\n')
+    download(diagnosticsFileName(), text || 'No entries.\n')
     setNote(t('Downloaded the log. Keys, tokens, and your home folder are hidden in it.'))
   }))
   const clearLog = () => run(actions.diagnosticsClear().then(clearClientErrors).then(load).then(() => setNote(t('Cleared the error log.'))))
@@ -100,19 +104,19 @@ export function FeedbackPage({ actions, run, Section, Row }) {
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => setPreview(!preview), 'aria-expanded': preview }, preview ? t('Hide') : t('Show')),
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: copyReport }, t('Copy'))),
       preview ? h('div', { className: 'bt-set-row bt-fb-preview' }, h('pre', { tabIndex: 0, 'aria-label': t('Diagnostics') }, report?.markdown || t('Loading…'))) : null,
-      h(Row, { label: t('GitHub issue'), hint: t('Opens a new issue in the DS Bot repository with all of this filled in. Nothing is sent until you submit it there.') },
+      h(Row, { label: t('GitHub issue'), hint: t('Opens a new issue in the {upstream} repository with all of this filled in. Nothing is sent until you submit it there.') },
         h('button', { type: 'button', className: 'bt-fb-primary', onClick: openIssue }, t('Report on GitHub')))),
     note ? h('div', { key: 'note', className: 'bt-note bt-fb-note', role: 'status' },
       note,
       issueLink ? [' ', h('a', { key: 'link', href: issueLink, target: '_blank', rel: 'noopener noreferrer' }, t('Open the issue'))] : null) : null,
     h(Section, { key: 'errors', title: report ? t('Recent errors · {count}', { count: total }) : t('Recent errors') },
       shown.length === 0
-        ? h(Row, { label: t('No errors recorded.'), hint: t('Failed model calls and DS Bot problems show here, newest first.') })
+        ? h(Row, { label: t('No errors recorded.'), hint: t('Failed model calls and {brand} problems show here, newest first.') })
         : shown.map((entry, index) => h('div', { key: `${entry.time}-${index}`, className: 'bt-set-row bt-fb-entry', title: entry.text },
             h('span', { className: 'bt-fb-dot', 'data-level': entry.level, 'aria-hidden': true }),
             h('div', { className: 'bt-set-copy' },
               h('span', { className: 'bt-fb-text' }, entrySummary(entry)),
-              h('span', { className: 'bt-set-hint' }, [whenText(entry.time), entry.bot, entry.where, t(SOURCES[entry.source] ?? 'DS Bot')].filter(Boolean).join(' · '))),
+              h('span', { className: 'bt-set-hint' }, [whenText(entry.time), entry.bot, entry.where, t(SOURCES[entry.source] ?? '{brand}')].filter(Boolean).join(' · '))),
             entry.code ? h('span', { className: 'bt-tag bt-fb-code' }, entry.status ? `${entry.code} ${entry.status}` : entry.code) : null)),
       h(Row, { label: t('Error log'), hint: t('Kept on this computer across restarts, up to about 1 MB.') },
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: downloadLog }, t('Download')),

@@ -6,6 +6,7 @@ import { test } from 'node:test'
 import { createRuntime } from '../index.js'
 import { expandCapabilityNames, validateCapabilityName } from '../src/host/capabilities.js'
 import { fakeContext } from './fake-ctx.js'
+import { BRAND } from '../src/shared/brand.js'
 
 let rt
 
@@ -175,7 +176,7 @@ test('capability tool descriptions and attach results explain approval', async t
     { name: 'blocked' },
     { agent: { id: 'worker' } },
   )
-  assert.ok(attached.endsWith(' The user must allow blocked in DS Bot settings before it can work.'))
+  assert.ok(attached.endsWith(` The user must allow blocked in ${BRAND} settings before it can work.`))
 })
 
 test('a deleted Bot drops only a pending local MCP it alone asked for', async t => {

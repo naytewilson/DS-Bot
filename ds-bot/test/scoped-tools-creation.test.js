@@ -5,7 +5,11 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { createRuntime } from '../index.js'
 import { TEAM_TOOLS } from '../src/host/constants.js'
+import { FABRIC_TOOLS } from '../src/host/fabric.js'
 import { fakeContext } from './fake-ctx.js'
+
+// Every tool a Bot Session is served: the team's own and the ANVIL fabric tools (on by default).
+const BOT_TOOLS = [...new Set([...TEAM_TOOLS, ...FABRIC_TOOLS])]
 
 // tools.js keeps the DSH names a Bot Session never serves in one place; the
 // assemble must add none of them.
@@ -184,7 +188,7 @@ test('a Bot Session gets every team tool in its own scope', async (t) => {
   t.after(host.stop)
   await host.call('state', {})
   await host.agentCreated('a')
-  assert.deepEqual(scopedNames(host, 'a').sort(), [...TEAM_TOOLS].filter(name => name !== 'read_browser').sort())
+  assert.deepEqual(scopedNames(host, 'a').sort(), [...BOT_TOOLS].filter(name => name !== 'read_browser').sort())
 })
 
 test('a Bot moved onto a local agent route gets the approval bridge, and loses it moving off', async (t) => {
@@ -213,7 +217,7 @@ test('a Session ds-bot does not own sees none of the team tools', async (t) => {
   assert.deepEqual(scopedNames(host, 'plain1'), [])
   // Nothing of the team's reaches the global layer a plain session reads; the
   // only team-named global is another plugin's show_view.
-  const leaked = [...host.ctx.registeredTools.keys()].filter(name => TEAM_TOOLS.includes(name))
+  const leaked = [...host.ctx.registeredTools.keys()].filter(name => BOT_TOOLS.includes(name))
   assert.deepEqual(leaked, ['show_view'])
   assert.equal(host.ctx.registeredTools.get('show_view').description, 'global')
 })
@@ -388,7 +392,7 @@ test("a Bot's own Session the creation path missed gets the whole scope at the a
   await host.call('state', {})
   const agent = host.agentOf('a')
   const assembled = await assemble(host, agent, { tools: [{ name: 'read' }], sections: [] })
-  const expected = [...TEAM_TOOLS].filter(name => name !== 'read_browser').sort()
+  const expected = [...BOT_TOOLS].filter(name => name !== 'read_browser').sort()
   assert.deepEqual(scopedNames(host, 'a').sort(), expected)
   assert.deepEqual(assembled.tools.map(tool => tool.name).sort(), ['read', ...expected].sort())
   // The hidden DSH tools are masked and filtered as on the creation path: none

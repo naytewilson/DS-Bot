@@ -216,6 +216,8 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
     diagnosticsLog: () => call('diagnostics-log'),
     diagnosticsClear: () => call('diagnostics-clear'),
     repoStars: () => call('repo-stars'),
+    // The ANVIL fabric (this host, its peers, the hub, ANVIL OS, SIEVE). `fresh` skips the host's short cache.
+    fabricStatus: ({ fresh = false } = {}) => call('fabric-status', fresh ? { fresh: true } : undefined),
     // A failed action away from any form (a menu, the palette) shows as a toast.
     reportError: (error, where = 'action') => {
       noteClientError(where, error)

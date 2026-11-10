@@ -39,6 +39,7 @@ import { GROUP_HEADING, GROUP_MEMORY_SOURCE, MEMORY_RECALL_SOURCE, MEMORY_UPDATE
 import { installReview } from './memory-review.js'
 import { installTidy } from './memory-tidy.js'
 import { output } from './tools.js'
+import { BRAND } from '../shared/brand.js'
 
 export { MEMORY_LIMITS, addLink, cleanEntry, cleanTopic, formatEntry, insertEntry, looksLikeKey, looksSecret, matchEntries, parseAsk, parseMemory, parseReview, removeLink, reviewEntries, splitMeta } from './memory-entries.js'
 export { writtenIn } from './memory-copy.js'
@@ -126,7 +127,7 @@ export function install(rt) {
   // writing over what could not be read, the way store.js treats a broken state.json.
   const unreadable = (path, error) => {
     rt.warn('ds-bot: unreadable memory file %s: %s', path, error)
-    throw Object.assign(new Error(`Memory file ${path} could not be read (${error?.code ?? error?.message}). DS Bot leaves it as it is; fix or move the file.`), { code: 'memory/unreadable' })
+    throw Object.assign(new Error(`Memory file ${path} could not be read (${error?.code ?? error?.message}). ${BRAND} leaves it as it is; fix or move the file.`), { code: 'memory/unreadable' })
   }
   const readText = (path) => {
     try {

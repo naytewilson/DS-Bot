@@ -362,15 +362,17 @@ test('a window holding live state gets fresh fields after the host restarts at t
   assert.equal(quiet.activity, undefined)
 })
 
-test('a new team starts with a DeepSeek-blue whale as its Main Bot', async (t) => {
-  const { call, stop } = start()
+test('a new team starts with an orange anvil as its Main Bot', async (t) => {
+  const { call, stop, home } = start()
   t.after(stop)
   const team = (await call('state', {})).value
   assert.equal(team.mainBotIds.length, 1)
   const main = team.bots.find(bot => bot.id === team.mainBotId)
   assert.equal(main.name, 'Chief')
-  assert.equal(main.color, 'deepseek')
-  assert.deepEqual(main.avatar, { shape: 'whale' })
+  assert.equal(main.color, 'orange')
+  assert.deepEqual(main.avatar, { shape: 'anvil' })
+  // A new team has nothing to move over, and is marked so that it never will.
+  assert.equal(JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).anvilStored, true)
 
   // Other Bots keep no stored look, so the client picks one from the id.
   const writer = (await call('create-bot', { name: 'Writer', role: '写作' })).value
@@ -416,6 +418,66 @@ test('a team from before the whale was stored gets it once, on its first Main Bo
   assert.equal(team.w2.color, undefined)
 })
 
+// The anvil replaced the whale as the stock look of the first Main Bot. A team saved with
+// the whale in DeepSeek blue and no photo moves over once; every other look is a choice.
+const whaleTeam = (first, extra = {}) => ({
+  version: 1,
+  mainBotIds: ['m1'],
+  revision: 4,
+  whaleStored: true,
+  bots: {
+    m1: { id: 'm1', sessionId: 'm1', name: 'Chief', role: 'Chief of Staff', instructions: '', createdAt: 1, ...first },
+    w2: { id: 'w2', sessionId: 'w2', name: 'Writer', role: 'Writer', instructions: '', createdAt: 2, color: 'deepseek', avatar: { shape: 'whale' } },
+  },
+  rooms: {},
+  exchanges: [],
+  exchangeTurns: {},
+  questions: {},
+  ...extra,
+})
+const looks = async (call) => Object.fromEntries((await call('state', {})).value.bots.map(bot => [bot.id, [bot.color, bot.avatar]]))
+
+test('the first Main Bot in the stock whale look gets the anvil once', async (t) => {
+  const { call, stop, home } = start(whaleTeam({ color: 'deepseek', avatar: { shape: 'whale' } }))
+  t.after(stop)
+  let team = await looks(call)
+  assert.deepEqual(team.m1, ['orange', { shape: 'anvil' }])
+  // Only the first Bot: another Bot's whale is its own.
+  assert.deepEqual(team.w2, ['deepseek', { shape: 'whale' }])
+  assert.equal(JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).anvilStored, true)
+  // Once: a Bot that goes back to the whale keeps it, also after a reload of the same team.
+  assert.equal((await call('update-bot', { id: 'm1', color: 'deepseek', avatar: { shape: 'whale' } })).ok, true)
+  team = await looks(call)
+  assert.deepEqual(team.m1, ['deepseek', { shape: 'whale' }])
+})
+
+test('a look the user picked on the first Main Bot is left alone by the anvil', async () => {
+  for (const first of [
+    { color: 'red', avatar: { shape: 'whale' } },
+    { color: 'deepseek', avatar: { shape: 'star' } },
+    { color: 'blue', avatar: { shape: 'moon' } },
+    { color: 'deepseek', avatar: { shape: 'whale', image: 'data:image/png;base64,AA==' } },
+    { color: 'deepseek', avatar: { image: 'data:image/png;base64,AA==' } },
+  ]) {
+    const { call, stop, home } = start(whaleTeam(first))
+    try {
+      assert.deepEqual((await looks(call)).m1, [first.color, first.avatar], JSON.stringify(first))
+      // The step is spent, whatever it found: the next save carries the flag.
+      assert.equal((await call('update-bot', { id: 'w2', role: 'Editor' })).ok, true)
+      assert.equal(JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).anvilStored, true)
+      assert.deepEqual((await looks(call)).m1, [first.color, first.avatar], `after a save: ${JSON.stringify(first)}`)
+    } finally {
+      await stop()
+    }
+  }
+})
+
+test('a team that already took the anvil step keeps its whale', async (t) => {
+  const { call, stop } = start(whaleTeam({ color: 'deepseek', avatar: { shape: 'whale' } }, { anvilStored: true }))
+  t.after(stop)
+  assert.deepEqual((await looks(call)).m1, ['deepseek', { shape: 'whale' }])
+})
+
 test('another Bot takes the Main Bot place in one step', async (t) => {
   const { call, stop } = start()
   t.after(stop)
@@ -424,8 +486,8 @@ test('another Bot takes the Main Bot place in one step', async (t) => {
   const team = (await call('set-main', { id: writer.id, main: true, replace: chief })).value
   assert.deepEqual(team.mainBotIds, [writer.id])
   assert.equal(team.mainBotId, writer.id)
-  // The whale stays with the Bot it was given to.
-  assert.deepEqual(team.bots.find(bot => bot.id === chief).avatar, { shape: 'whale' })
+  // The anvil stays with the Bot it was given to.
+  assert.deepEqual(team.bots.find(bot => bot.id === chief).avatar, { shape: 'anvil' })
   // The old Main Bot can now be deleted, and no new Chief is made in its place.
   assert.equal((await call('delete-bot', { id: chief })).ok, true)
   const after = (await call('state', {})).value

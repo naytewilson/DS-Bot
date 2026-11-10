@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { createRuntime } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
+import { BRAND } from '../src/shared/brand.js'
 
 let rt
 
@@ -186,7 +187,7 @@ const until = async (check, ms = 3000) => {
 
 const text = message => message.content.map(block => block.text ?? '').join('\n')
 const inboxTexts = agent => [...agent.inbox.nextStep, ...agent.inbox.nextTurn].map(text)
-const PAUSE = 'DS Bot paused your turn for a context check. Go on with it now from where you stopped.'
+const PAUSE = `${BRAND} paused your turn for a context check. Go on with it now from where you stopped.`
 const said = (id, body, exchangeId) => ({ id, role: 'user', content: [{ type: 'text', text: body }], source: { kind: 'user', ...(exchangeId ? { exchangeId } : {}) } })
 // A folder outside the team workspace asks for approval once; then the move is allowed.
 const services = {

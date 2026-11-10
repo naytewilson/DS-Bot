@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import {
-  CHECK_TTL_MS, cleanVersion, encodeName, fetchJson, installSpecOf,
+  CHECK_TTL_MS, cleanVersion, editionOf, encodeName, fetchJson, installSpecOf,
   newer, registryPlan, repoSlug, sourceOf,
 } from './update.js'
 
@@ -19,7 +19,7 @@ const PKG = JSON.parse(readFileSync(new URL('../../package.json', import.meta.ur
 const APP_BOOT = '@deepseek-ai/dsh-app-boot'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
 
-export function install(rt) {
+export function install(rt, { edition = editionOf(PKG) } = {}) {
   const { ctx, config } = rt
   const enabled = config.updateCheck !== false
 
@@ -106,7 +106,9 @@ export function install(rt) {
       // The release the running package itself verified stays the floor: a bot
       // older than its own declaration has nothing newer to offer.
       const declared = inApp ? [] : [{ verifiedDsh: PKG.dsBot?.verifiedDsh }]
-      const released = inApp ? null : await releasedDeclaration(sourceOf(await installSpecOf(ctx)))
+      // An edition is managed by its own fabric: the upstream release is never consulted, so the
+      // only DSH it can name is the one its own package.json verified.
+      const released = inApp || edition !== null ? null : await releasedDeclaration(sourceOf(await installSpecOf(ctx)))
       if (released) declared.push(released)
       const newestDeclared = declared
         .filter(entry => cleanVersion(entry.verifiedDsh))

@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import { build } from 'esbuild'
+import { BRAND, UPSTREAM } from '../src/shared/brand.js'
 
 const bundle = await build({
   entryPoints: [fileURLToPath(new URL('../src/client/about.js', import.meta.url))],
@@ -33,7 +34,7 @@ runInNewContext(bundle.outputFiles[0].text, {
 })
 const { AboutPage, ownAppRow } = module.exports
 
-// The DS Bot row in Settings → About, with the row's hint and its buttons' text, class
+// The product's row in Settings → About, with the row's hint and its buttons' text, class
 // and clicks. `update` is the value the update source holds.
 function page(update) {
   const calls = []
@@ -44,7 +45,7 @@ function page(update) {
   const tree = AboutPage({ useUpdate: select => select(update), actions, run, Section: 'section', Row: 'row' })
   const find = (node, pick) => (Array.isArray(node) ? node.flatMap(one => find(one, pick))
     : node && typeof node === 'object' ? [...pick(node), ...find(node.children, pick)] : [])
-  const [row] = find(tree, node => (node.props?.label === 'DS Bot' ? [node] : []))
+  const [row] = find(tree, node => (node.props?.label === BRAND ? [node] : []))
   const buttons = find(row?.children ?? [], node => (node.type === 'button' ? [node] : []))
   return {
     hint: row?.props?.hint,
@@ -53,8 +54,8 @@ function page(update) {
   }
 }
 
-// 公开#499: in the desktop app the DS Bot row shows the app's own update state.
-test('the six app update states set the DS Bot row\'s hint and button', () => {
+// 公开#499: in the desktop app the product's row shows the app's own update state.
+test('the six app update states set the product row\'s hint and button', () => {
   const cases = [
     [{ phase: 'checking' }, 'Checking for updates…', []],
     [{ phase: 'current' }, 'Up to date', [{ text: 'Check for updates', className: 'bt-soft bt-soft-sm', action: 'checkOwnApp' }]],
@@ -82,7 +83,7 @@ test('the six app update states set the DS Bot row\'s hint and button', () => {
 test('without an app update state the row keeps today\'s text and no button', () => {
   for (const ownApp of [undefined, null, 'checking', {}]) {
     const view = page({ source: 'app', ownApp })
-    assert.equal(view.hint, 'Updates come with the DS Bot app.')
+    assert.equal(view.hint, `Updates come with the ${BRAND} app.`)
     assert.deepEqual(view.buttons, [])
   }
 })
@@ -104,4 +105,68 @@ test('ownAppRow maps each phase to its hint and button kind', () => {
   const downloaded = ownAppRow({ phase: 'downloaded', version: '0.2.2' })
   assert.equal(downloaded.hint, '0.2.2 is ready; it installs when you restart')
   assert.equal(downloaded.button, 'restart')
+})
+
+// The page is the product's own, with a line that credits the project it is built on and
+// keeps the repository links.
+test('the About hero names the product and credits the upstream project', () => {
+  const actions = new Proxy({ repoStars: async () => null }, { get: (target, name) => target[name] ?? (() => {}) })
+  const update = { current: '0.3.2', repoUrl: 'https://github.com/Fei2411/DS-Bot', notesUrl: 'https://github.com/Fei2411/DS-Bot/releases', source: 'registry' }
+  const tree = AboutPage({ useUpdate: select => select(update), actions, run: promise => promise, Section: 'section', Row: 'row' })
+  const find = (node, pick) => (Array.isArray(node) ? node.flatMap(one => find(one, pick))
+    : node && typeof node === 'object' ? [...pick(node), ...find(node.children, pick)] : [])
+  const text = (node) => (Array.isArray(node) ? node.map(text).join('') : typeof node === 'string' ? node : node?.children ? text(node.children) : '')
+  const named = className => find(tree, node => (node.props?.className === className ? [node] : []))
+  // The bundled module's realm has its own Array, so compare plain copies.
+  assert.deepEqual(Array.from(named('bt-about-name').map(text)), [BRAND])
+  assert.deepEqual(Array.from(named('bt-about-credit').map(text)), [`Built on ${UPSTREAM}`])
+  assert.deepEqual(Array.from(named('bt-about-version').map(text)), ['Version 0.3.2'])
+  const [star] = find(tree, node => (node.props?.className === 'bt-star' ? [node] : []))
+  assert.equal(star.props.title, `Star ${UPSTREAM} on GitHub`)
+  assert.equal(star.props.href, update.repoUrl)
+  // The repository links stay.
+  const rows = find(tree, node => (node.props?.label !== undefined ? [node.props.label] : []))
+  assert.ok(rows.includes('Source code') && rows.includes('Release notes') && rows.includes('Report a problem'))
+})
+
+// The ANVIL edition is installed from the owner's own commit and managed by the owner's fabric:
+// the page says so, offers no check or update, and shows the edition with the upstream version.
+test('an edition install says it is managed by the fabric and offers neither a check nor an update', () => {
+  const update = { edition: 'anvil', managed: true, base: '0.3.2', source: 'fabric', current: '0.3.2', latest: null, available: false, enabled: true, phase: 'idle', repoUrl: 'https://github.com/Fei2411/DS-Bot', notesUrl: 'https://github.com/Fei2411/DS-Bot/releases' }
+  const view = page(update)
+  assert.equal(view.hint, 'Managed by your fabric.')
+  assert.deepEqual(view.buttons, [])
+  // Even a stale "available" and a failed phase cannot bring a button back.
+  for (const extra of [{ available: true, latest: '9.9.9', phase: 'idle' }, { phase: 'failed', error: 'x' }, { enabled: false }, { checkedAt: Date.now() }]) {
+    const again = page({ ...update, ...extra })
+    assert.equal(again.hint, 'Managed by your fabric.')
+    assert.deepEqual(again.buttons, [])
+  }
+})
+
+test('the About hero of an edition shows the edition and the upstream version it is built on, and labels the notes as upstream\'s', () => {
+  const actions = new Proxy({ repoStars: async () => null }, { get: (target, name) => target[name] ?? (() => {}) })
+  const update = { edition: 'anvil', managed: true, base: '0.3.2', source: 'fabric', current: '0.3.2', repoUrl: 'https://github.com/Fei2411/DS-Bot', notesUrl: 'https://github.com/Fei2411/DS-Bot/releases' }
+  const tree = AboutPage({ useUpdate: select => select(update), actions, run: promise => promise, Section: 'section', Row: 'row' })
+  const find = (node, pick) => (Array.isArray(node) ? node.flatMap(one => find(one, pick))
+    : node && typeof node === 'object' ? [...pick(node), ...find(node.children, pick)] : [])
+  const text = (node) => (Array.isArray(node) ? node.map(text).join('') : typeof node === 'string' ? node : node?.children ? text(node.children) : '')
+  const named = className => find(tree, node => (node.props?.className === className ? [node] : []))
+  assert.deepEqual(Array.from(named('bt-about-edition').map(text)), ['ANVIL edition'])
+  assert.deepEqual(Array.from(named('bt-about-name').map(text)), [`${BRAND}ANVIL edition`])
+  assert.deepEqual(Array.from(named('bt-about-credit').map(text)), [`Built on ${UPSTREAM} 0.3.2`])
+  assert.deepEqual(Array.from(named('bt-about-version').map(text)), ['Version 0.3.2'])
+  const rows = find(tree, node => (node.props?.label !== undefined ? [node.props.label] : []))
+  assert.ok(rows.includes('Upstream release notes'))
+  assert.ok(!rows.includes('Release notes'))
+  // The upstream release shows none of it.
+  const plain = AboutPage({ useUpdate: select => select({ current: '0.3.2', source: 'registry', edition: null, base: null, managed: false }), actions, run: promise => promise, Section: 'section', Row: 'row' })
+  assert.equal(find(plain, node => (node.props?.className === 'bt-about-edition' ? [node] : [])).length, 0)
+})
+
+test('the page label of an edition has a name, and an unknown edition is named by itself', () => {
+  assert.equal(module.exports.editionName('anvil'), 'ANVIL edition')
+  assert.equal(module.exports.editionName('lab'), 'lab edition')
+  assert.equal(module.exports.editionName(null), null)
+  assert.equal(module.exports.editionName(''), null)
 })

@@ -5,6 +5,7 @@ import { execFile, spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
+import { BRAND } from '../../shared/brand.js'
 
 // The CLI signs in by itself; an API key or another agent's backend variable in
 // our environment would shadow that or leak, so neither reaches the child.
@@ -123,7 +124,7 @@ export function launchOf(executable, args, { platform = process.platform, readFi
   if (shimmed !== undefined) return { file: shimmed.file, args: shimmed.script === undefined ? args : [shimmed.script, ...args] }
   // Another kind of batch file goes through cmd.exe, which only passes plain arguments intact.
   if (![executable, ...args].every(arg => CMD_SAFE.test(arg))) {
-    throw new Error(`${win32.basename(executable)} is a batch file that DS Bot cannot start with these arguments. Point the agent at its .exe or Node script instead.`)
+    throw new Error(`${win32.basename(executable)} is a batch file that ${BRAND} cannot start with these arguments. Point the agent at its .exe or Node script instead.`)
   }
   const line = [executable, ...args].map(arg => (arg === '' || arg.includes(' ') ? `"${arg}"` : arg)).join(' ')
   return { file: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], options: { windowsVerbatimArguments: true } }

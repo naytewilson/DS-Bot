@@ -10,10 +10,12 @@ import { PANEL_LINGER_MS, BotPanel } from './browser-pane.js'
 import { frameLayout, FALLBACK_SIDEBAR_WIDTH } from './frame-layout.js'
 import { MemoryDialog } from './memory-panel.js'
 import { useLinger } from './motion.js'
+import { BootSplash } from './brand.js'
 
 // How long a closing dialog or menu stays for its exit (see their [data-leaving] CSS).
 const DIALOG_EXIT_MS = 160
 const MENU_EXIT_MS = 120
+const SPLASH_EXIT_MS = 200
 
 export function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useActivity, useWork, useRegistry, useBrowserPages, useBrowserTabs, useBrowserHolds, useUpdate, useFrame, useSidebarPref, useSettingsShellHeld, actions }) {
   const roster = useRoster(value => value)
@@ -60,7 +62,11 @@ export function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useA
   const [memory, memoryLeaving] = useLinger(ui.memory && memoryOwner(ui.memory) ? ui.memory : null, DIALOG_EXIT_MS)
   const owner = memory ? memoryOwner(memory) : null
   const [menu, menuLeaving] = useLinger(ui.menu, MENU_EXIT_MS)
+  // The main pane shows the boot splash until the team answers; a team that failed to start
+  // says so in the sidebar and gives the pane back.
+  const [splash, splashLeaving] = useLinger(!roster.ready && ui.bootFailed !== true ? 'boot' : null, SPLASH_EXIT_MS)
   return h(Fragment, null,
+    splash ? createPortal(h(BootSplash, { paneLeft: layout.column, leaving: splashLeaving }), document.body) : null,
     pane ? createPortal(h(BotPanel, { pane, leaving: shown === null, room: layout.room, overlay: layout.panel === 'overlay', roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages, useBrowserHolds }), document.body) : null,
     ui.newChat ? createPortal(h(NewChat, { key: `${ui.newChat}:${ui.newChatSection ?? ''}`, mode: ui.newChat, sectionId: ui.newChatSection ?? null, paneLeft: layout.column, roster, actions }), document.body) : null,
     ui.palette ? createPortal(h(CommandPalette, { key: ui.palette.token, start: ui.palette.query, token: ui.palette.token, roster, actions, useSessions }), document.body) : null,

@@ -51,14 +51,16 @@ function navigationSidebar(wide, { leftDrawer = false } = {}) {
   const room = { id: 'room', name: 'Team', members: [], createdAt: 2 }
   const agent = { id: 'agent', sessions: ['session'], createdAt: 3 }
   const roster = { bots: [bot], rooms: [room], agents: [agent], byId: { writer: bot }, ready: true }
-  const actions = Object.fromEntries(['openSession', 'openAgent', 'openAgentSession', 'newAgentSession'].map(name => [name, id => { calls.push([name, id]); return id }]))
+  const actions = Object.fromEntries(['openSession', 'openAgent', 'openAgentSession', 'newAgentSession', 'openSettings', 'openPalette'].map(name => [name, id => { calls.push([name, id]); return id }]))
   actions.toggleSidebar = () => { calls.push(['toggleSidebar']) }
   actions.setLeftDrawer = (on) => { calls.push(['setLeftDrawer', on]) }
   const rows = []
+  const found = {}
   const walk = (node) => {
     if (Array.isArray(node)) { node.forEach(walk); return }
     if (!node || typeof node !== 'object') return
     if (['BotRow', 'RoomRow', 'AgentRow'].includes(node.type?.name)) rows.push(node)
+    if (['LeftColumn', 'TitleToggle', 'AccountLauncher'].includes(node.type?.name)) found[node.type.name] = node
     walk(node.props?.children)
   }
   const render = (nextWide = wide) => {
@@ -79,10 +81,10 @@ function navigationSidebar(wide, { leftDrawer = false } = {}) {
     walk(tree)
   }
   render()
-  return { calls, rows, actions, render }
+  return { calls, rows, actions, render, found }
 }
 
-for (const width of [390, 1023, 1024, 1280]) {
+for (const width of [660, 1023, 1024, 1280]) {
   for (const wide of [false, true]) {
     test(`sidebar navigation at ${width}px with ${wide ? 'expanded content' : 'our own column'} just navigates`, () => {
       viewport.innerWidth = width
@@ -101,14 +103,14 @@ for (const width of [390, 1023, 1024, 1280]) {
 }
 
 test('a row picked from the floating drawer closes it', () => {
-  viewport.innerWidth = 390
+  viewport.innerWidth = 660
   const side = navigationSidebar(false, { leftDrawer: true })
   side.rows[0].props.actions.openSession('picked')
   assert.deepEqual(side.calls, [['openSession', 'picked'], ['setLeftDrawer', false]])
 })
 
 test('a row picked outside the drawer leaves it alone', () => {
-  viewport.innerWidth = 390
+  viewport.innerWidth = 660
   const side = navigationSidebar(false)
   side.rows[0].props.actions.openSession('picked')
   assert.deepEqual(side.calls, [['openSession', 'picked']])
@@ -592,3 +594,58 @@ test('TeamSidebar subscribes to specific ui slices rather than the whole ui obje
   }
 })
 
+
+// On a phone the left column is closed until the drawer opens, and then it is the wide
+// content over the chat, never the rail.
+test('a phone has no column while the drawer is closed', () => {
+  viewport.innerWidth = 390
+  const side = navigationSidebar(false)
+  assert.equal(side.rows.length, 0)
+  assert.equal(side.found.LeftColumn, undefined)
+  // The switch that opens the drawer is on screen, and taps open it.
+  assert.equal(side.found.TitleToggle.props.hidden, true)
+})
+
+for (const [width, drawerWidth] of [[639, 320], [390, 320], [360, 304], [320, 264]]) {
+  test(`a phone at ${width}px opens the wide content as a drawer ${drawerWidth}px wide with a backdrop that closes it`, () => {
+    viewport.innerWidth = width
+    const side = navigationSidebar(false, { leftDrawer: true })
+    const column = side.found.LeftColumn.props
+    assert.equal(column.mode, 'drawer')
+    assert.equal(column.width, drawerWidth)
+    assert.equal(column.onGrip, null)
+    assert.equal(side.rows.length, 3)
+    assert.ok(side.rows.every(row => row.props.wide === true))
+    column.onBackdrop()
+    assert.deepEqual(side.calls, [['setLeftDrawer', false]])
+  })
+}
+
+test('a window of 640px and wider keeps the column, its grip and no backdrop', () => {
+  viewport.innerWidth = 640
+  const side = navigationSidebar(false)
+  const column = side.found.LeftColumn.props
+  assert.equal(column.mode, 'rail')
+  assert.equal(typeof column.onGrip, 'function')
+  assert.equal(column.onBackdrop, null)
+})
+
+test('Settings and the palette opened from the phone drawer close it first', () => {
+  viewport.innerWidth = 390
+  const side = navigationSidebar(false, { leftDrawer: true })
+  side.found.AccountLauncher.props.actions.openSettings('general')
+  assert.deepEqual(side.calls, [['setLeftDrawer', false], ['openSettings', 'general']])
+  side.calls.length = 0
+  side.rows[0].props.actions.openSession('picked')
+  assert.deepEqual(side.calls, [['openSession', 'picked'], ['setLeftDrawer', false]])
+})
+
+test('the phone drawer has a backdrop, safe-area padding and reduced-motion rules, and the switch is a 40px target', () => {
+  const css = SHELL_CSS
+  const phone = css.slice(css.indexOf('@media (max-width:639px){\n.bt-leftcol-backdrop'))
+  assert.match(phone, /\.bt-leftcol-backdrop\{display:block;position:fixed;inset:0;/)
+  assert.match(phone, /\.bt-leftcol\[data-phone\]\{[^}]*env\(safe-area-inset-bottom/)
+  assert.match(phone, /\.bt-leftcol\[data-phone\]\{[^}]*max-width:calc\(100vw - 56px\)/)
+  assert.match(css, /@media \(max-width:639px\) and \(prefers-reduced-motion:reduce\)\{\.bt-leftcol-backdrop\{animation:none\}/)
+  assert.match(css, /@media \(max-width:639px\)\{\nhtml:not\(\[data-windows-titlebar\]\) \.bt-title-toggle\{width:40px;height:40px;/)
+})

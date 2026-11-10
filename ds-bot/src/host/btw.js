@@ -9,8 +9,9 @@ import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { replaceFile } from './files.js'
+import { BRAND } from '../shared/brand.js'
 
-export const RESTART_ERROR = 'DS Bot restarted before this answer finished.'
+export const RESTART_ERROR = `${BRAND} restarted before this answer finished.`
 export const TOOL_ERROR = 'The model called a tool again after being told not to, so this aside was not answered.'
 export const EMPTY_ERROR = 'The model wrote nothing.'
 // Events that still belong to a turn. A model selection or a title does not.

@@ -11,6 +11,15 @@ export const RAIL_WIDTH = 88
 export const PANEL_MIN = { details: 320, browser: 360, side: 320 }
 // The shell collapses its own sidebar below this width.
 export const DSH_NARROW = 1024
+// Below this width the window is a phone: the left column takes no layout width and
+// opens as a drawer over the conversation, whatever the saved column preference.
+export const PHONE = 640
+export const PHONE_GUTTER = 56
+export const PHONE_DRAWER_MAX = 320
+// A viewport of 0 is not measured yet, not a phone.
+export const isPhone = viewport => viewport > 0 && viewport < PHONE
+// The phone drawer's width: the viewport less a gutter to tap the backdrop, up to 320.
+export const phoneDrawerWidth = viewport => Math.max(0, Math.min(viewport - PHONE_GUTTER, PHONE_DRAWER_MAX))
 // The open column's width range; a drag released short of RAIL_SNAP lands on the rail.
 export const SIDEBAR_MIN = 264
 export const SIDEBAR_MAX = 420
@@ -29,6 +38,12 @@ export const RAIL_SNAP = (RAIL_WIDTH + SIDEBAR_MIN) / 2
  *   viewport minus `column`.
  */
 export function frameLayout({ viewport, sidebarWidth, pref, drawer = false, panel = null }) {
+  if (isPhone(viewport)) {
+    // The column is closed unless the drawer is open, and never takes layout width.
+    // A panel never fits beside the chat: it covers it when asked for, else folds.
+    const panelState = panel === null ? 'none' : panel.yielded === true ? 'overlay' : 'folded'
+    return { left: drawer ? 'drawer' : 'hidden', panel: panelState, column: 0, room: Math.max(0, viewport) }
+  }
   const fits = pref === 'open' && viewport >= sidebarWidth + MIN_CHAT
   let left = pref === 'hidden' ? 'hidden' : fits ? 'open' : drawer && pref === 'open' ? 'drawer' : 'rail'
   let occupied = left === 'open' ? sidebarWidth : left === 'hidden' ? 0 : RAIL_WIDTH
@@ -57,6 +72,17 @@ export function dragColumn(x, viewport) {
   const docks = viewport >= SIDEBAR_MIN + MIN_CHAT
   const high = docks ? Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, viewport - MIN_CHAT)) : SIDEBAR_MAX
   return { left: docks ? 'open' : 'drawer', width: Math.round(Math.max(SIDEBAR_MIN, Math.min(x, high))) }
+}
+
+/**
+ * What the top-left switch does. On a phone it opens or closes the drawer and
+ * leaves the saved column preference alone, so the desktop layout comes back
+ * untouched; elsewhere it hides the column or brings back the one it hid.
+ * @returns {{pref: string, drawer: boolean, panelYield: boolean}}
+ */
+export function switchResult({ viewport, pref, shown, drawer, panelYield }) {
+  if (isPhone(viewport)) return { pref, drawer: !drawer, panelYield }
+  return { pref: toggledPref(pref, shown), drawer: false, panelYield: false }
 }
 
 // The top-left switch hides the whole column and brings back the one it hid.

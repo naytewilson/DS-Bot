@@ -9,6 +9,7 @@ import { replaceFile } from './files.js'
 import { homeLock } from './home-lock.js'
 import { currentColor, headOf, normalize, unquote } from './text.js'
 import { AMBIGUOUS_OLD_ROUTES, legacyRoute } from './local-agents/engines.js'
+import { BRAND } from '../shared/brand.js'
 
 // A table read that sees only the keys the table holds itself. Ids that come from
 // outside (a request body, a tool argument, a name a model gives) go through this, so
@@ -61,7 +62,7 @@ export function install(rt) {
     }
   }
   const readOnly = () => {
-    if (stuck !== undefined) return `The Bot team file ${statePath} could not be read (${stuck}). DS Bot does not change it; fix or move the file and reload.`
+    if (stuck !== undefined) return `The Bot team file ${statePath} could not be read (${stuck}). ${BRAND} does not change it; fix or move the file and reload.`
     if (holder === undefined) return undefined
     const where = holder.pid ? `pid ${holder.pid}${holder.host ? ` on ${holder.host}` : ''}` : 'unknown process'
     return `The Bot team in ${home} is open in another dsh (Web or Desktop, ${where}). This window shows the team but cannot change it; close the other one and reload.`
@@ -103,7 +104,7 @@ export function install(rt) {
       stuck = undefined
       return parsed
     }
-    stuck = 'saved by a newer DS Bot; update DS Bot'
+    stuck = `saved by a newer ${BRAND}; update ${BRAND}`
     return undefined
   }
 
@@ -178,14 +179,29 @@ export function install(rt) {
     // Teams from before the whale was stored at setup: their first Bot, while still a
     // Main Bot, gets it once wherever it has no look of its own. After that the whale is
     // an ordinary look the user can change, and it never passes to another Bot.
+    const firstBot = Object.values(state.bots).reduce((best, bot) => (best === undefined || (bot.createdAt ?? 0) < (best.createdAt ?? 0) ? bot : best), undefined)
     if (state.whaleStored !== true) {
-      const first = Object.values(state.bots).reduce((best, bot) => (best === undefined || (bot.createdAt ?? 0) < (best.createdAt ?? 0) ? bot : best), undefined)
+      const first = firstBot
       if (first !== undefined && state.mainBotIds.includes(first.id)) {
         if (!first.avatar?.shape && !first.avatar?.image) first.avatar = { ...first.avatar, shape: 'whale' }
         if (!first.color) first.color = 'deepseek'
       }
       state.whaleStored = true
       if (first !== undefined) migrated = true
+    }
+    // The ANVIL edition's anvil takes the whale's place on the team's first Main Bot, once.
+    // Only the stock look moves over (the whale in DeepSeek blue, no photo); any other look
+    // is one the user picked and stays. After this the anvil is an ordinary look too: a
+    // Bot that goes back to the whale keeps it, and no other Bot is touched. The step writes
+    // the team only when it changed a look; the flag rides along with the next save.
+    if (state.anvilStored !== true) {
+      const first = firstBot
+      if (first !== undefined && state.mainBotIds.includes(first.id) && !first.avatar?.image && first.avatar?.shape === 'whale' && first.color === 'deepseek') {
+        first.avatar = { ...first.avatar, shape: 'anvil' }
+        first.color = 'orange'
+        migrated = true
+      }
+      state.anvilStored = true
     }
     if (Object.hasOwn(LEGACY_THEMES, state.prefs.theme ?? '')) {
       state.prefs.theme = LEGACY_THEMES[state.prefs.theme]

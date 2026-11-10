@@ -6,6 +6,7 @@ import { test } from 'node:test'
 import { createRuntime } from '../index.js'
 import { trimToolBoundary } from '../src/host/btw.js'
 import { fakeContext } from './fake-ctx.js'
+import { BRAND } from '../src/shared/brand.js'
 
 const user = text => ({ role: 'user', content: [{ type: 'text', text }] })
 const assistant = (...blocks) => ({ role: 'assistant', content: blocks })
@@ -281,7 +282,7 @@ test('a restart marks an aside that was still answering as failed', async (t) =>
   t.after(() => env.stop())
   const [live, old] = cardsOf(env.rt)
   assert.equal(live.status, 'failed')
-  assert.equal(live.error, 'DS Bot restarted before this answer finished.')
+  assert.equal(live.error, `${BRAND} restarted before this answer finished.`)
   assert.equal(typeof live.finishedAt, 'number')
   assert.equal(live.question, 'Still going?')
   assert.equal(old.status, 'done')
@@ -289,7 +290,7 @@ test('a restart marks an aside that was still answering as failed', async (t) =>
   assert.equal(old.finishedAt, 11)
   const file = cardsFile(env.home)
   assert.equal(file[0].status, 'failed')
-  assert.equal(file[0].error, 'DS Bot restarted before this answer finished.')
+  assert.equal(file[0].error, `${BRAND} restarted before this answer finished.`)
   assert.equal(file[1].status, 'done')
   const saved = JSON.parse(readFileSync(join(env.home, 'state.json'), 'utf8'))
   assert.equal('btwCards' in saved, false)
@@ -389,7 +390,7 @@ test('an earlier part page carries that part\'s cards, read from its file', asyn
   assert.equal(page.value.btw[0].id, 'there')
   // The owning host's lazy read still records the restart this file kept.
   assert.equal(page.value.btw[1].status, 'failed')
-  assert.equal(page.value.btw[1].error, 'DS Bot restarted before this answer finished.')
+  assert.equal(page.value.btw[1].error, `${BRAND} restarted before this answer finished.`)
   const file = cardsFile(env.home, 'b1', 's-old')
   assert.equal(file[1].status, 'failed')
 })

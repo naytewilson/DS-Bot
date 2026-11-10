@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { replaceFile } from './files.js'
 import { output } from './tools.js'
+import { BRAND } from '../shared/brand.js'
 
 export const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/
 export const ENV_PREFIX = 'DSH_SECRET_'
@@ -180,7 +181,7 @@ export function install(rt) {
 
   // Resolves once secrets.json holds the current map; rejects when the write failed.
   const persist = () => {
-    if (blocked !== undefined) return Promise.reject(new Error(`The secrets file ${path} could not be read (${blocked}). DS Bot does not change it; fix or move the file and reload.`))
+    if (blocked !== undefined) return Promise.reject(new Error(`The secrets file ${path} could not be read (${blocked}). ${BRAND} does not change it; fix or move the file and reload.`))
     const readOnly = rt.readOnly()
     if (readOnly !== undefined) return Promise.reject(new Error(readOnly))
     const snapshot = JSON.stringify({ version: 1, secrets: [...secrets.values()] }, null, 2)
@@ -547,7 +548,7 @@ export function install(rt) {
       try {
         unregister = sub.shellEnv.register({
           name: 'ds-bot-secrets',
-          variables: Object.fromEntries(list.map(secret => [envName(secret.name), { description: `DS Bot secret ${secret.name}${secret.purpose ? `: ${secret.purpose}` : ''}` }])),
+          variables: Object.fromEntries(list.map(secret => [envName(secret.name), { description: `${BRAND} secret ${secret.name}${secret.purpose ? `: ${secret.purpose}` : ''}` }])),
           resolve: resolveEnv,
         })
       } catch (error) {

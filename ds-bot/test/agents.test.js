@@ -5,7 +5,11 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { createRuntime } from '../index.js'
 import { TEAM_TOOLS } from '../src/host/constants.js'
+import { FABRIC_TOOLS } from '../src/host/fabric.js'
 import { fakeContext } from './fake-ctx.js'
+
+// Every tool a Bot Session is served: the team's own and the ANVIL fabric tools (on by default).
+const BOT_TOOLS = [...new Set([...TEAM_TOOLS, ...FABRIC_TOOLS])]
 
 const flush = async () => { for (let index = 0; index < 8; index += 1) await Promise.resolve() }
 
@@ -24,7 +28,7 @@ function start(team, { config = {} } = {}) {
   const scoped = []
   const renamed = []
   let sessions = 0
-  ctx.tools.schemas = () => [...TEAM_TOOLS, 'read', 'write'].map(name => ({ name }))
+  ctx.tools.schemas = () => [...BOT_TOOLS, 'read', 'write'].map(name => ({ name }))
   Object.assign(ctx, {
     workspaceRegistry: {
       get: id => workspaces.get(id),
@@ -210,7 +214,7 @@ test('TEAM_TOOLS names exactly the tools ds-bot defines for Bot sessions', async
   // read_browser exists only in the Desktop profile; the flag stands in for it.
   const { stop } = start(TEAM, { config: { browser: true } })
   t.after(stop)
-  assert.deepEqual(rt.teamTools.map(d => d.name).sort(), [...TEAM_TOOLS].sort())
+  assert.deepEqual(rt.teamTools.map(d => d.name).sort(), [...BOT_TOOLS].sort())
 })
 
 test('agent-session honors a known workspace and falls back to the team workspace', async (t) => {
@@ -264,7 +268,7 @@ test('a Bot Session gets the team tools in its own scope; a DSH Agent Session ge
   })
   await flush()
   assert.deepEqual(scoped.filter(entry => entry.sessionId === 'm1').map(entry => entry.name).sort(),
-    [...TEAM_TOOLS].filter(name => name !== 'read_browser').sort())
+    [...BOT_TOOLS].filter(name => name !== 'read_browser').sort())
   assert.equal(restricted.length, 0)
   // An Agent Session is a plain dsh conversation: nothing is scoped onto it and
   // nothing is masked, because the team tools never reach the global layer.

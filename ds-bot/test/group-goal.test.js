@@ -6,6 +6,7 @@ import { test } from 'node:test'
 import { createRuntime } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
 import { ROOM_WORK_GRACE_MS } from '../src/host/constants.js'
+import { BRAND } from '../src/shared/brand.js'
 
 // Chief, the admin of group 'r1', speaks there from 'ga'; Writer from 'gb'; Tester from 'gc'.
 const seed = (room = {}, extraRooms = {}) => ({
@@ -326,7 +327,7 @@ test('an idle round wakes the admin for a goal check; [PASS] waits for the user'
   await settle(() => host.agentOf('ga').calls.length === 2)
   const prompt = text(host.agentOf('ga').calls[1])
   assert.match(prompt, /goal check/)
-  assert.match(prompt, /Goal check from DS Bot/)
+  assert.match(prompt, new RegExp(`Goal check from ${BRAND}`))
   host.begin('ga')
   host.finish('ga', '[PASS]')
   await settle(() => check() !== undefined)
