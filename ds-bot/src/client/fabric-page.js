@@ -7,7 +7,7 @@ import { FabricIcon, RefreshIcon } from './icons.js'
 import { dateLocale, t } from './i18n.js'
 import {
   CHIP_POLL_MS, PAGE_POLL_MS, agoText, browserVisibility, bytesText, chipLabel, countText, deriveState, durationText, errorText,
-  fabricFeed, harnessRows, hostMeters, hubGroups, isAbsent, latencyText, levelText, levelTone, metricLabel, metricValue,
+  fabricFeed, harnessRows, hostMeters, hubGroups, ingressAddress, ingressTitle, isAbsent, latencyText, levelText, levelTone, metricLabel, metricValue,
   percentText, poll, savings, sinceText, unitState,
 } from './fabric-data.js'
 
@@ -229,15 +229,20 @@ function HarnessRow({ row }) {
 }
 
 function IngressRow({ entry }) {
+  const title = ingressTitle(entry.url)
+  const address = ingressAddress(entry.url)
   const detail = [
     Number.isFinite(entry.uptimeMs) ? t('Up {time}', { time: durationText(entry.uptimeMs / 1000) }) : null,
     Number.isFinite(entry.requestsToday) ? t('{count} requests today', { count: countText(entry.requestsToday) }) : null,
   ].filter(Boolean)
+  // The small line: the address in mono (unless it already is the title), then uptime and
+  // requests, or why it is down.
+  const secondary = [title === address ? null : h('span', { key: 'address', className: 'bt-fab-mono' }, address), ...(entry.ok ? detail : [errorText(entry.error)])].filter(part => part !== null)
   return h('div', { className: 'bt-fab-row' },
     h(Dot, { tone: entry.ok ? 'ok' : 'bad' }),
     h('div', { className: 'bt-fab-row-main' },
-      h('span', { className: 'bt-fab-name bt-fab-mono', title: entry.url }, entry.url),
-      entry.ok ? (detail.length > 0 ? h('span', { className: 'bt-fab-hint' }, detail.join(' · ')) : null) : h('span', { className: 'bt-fab-hint' }, errorText(entry.error))),
+      h('span', { className: title === address ? 'bt-fab-name bt-fab-mono' : 'bt-fab-name', title: address }, title),
+      secondary.length > 0 ? h('span', { className: 'bt-fab-hint' }, secondary.flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))) : null),
     h('span', { className: 'bt-fab-meta' }, entry.ok ? t('Healthy') : t('Down')))
 }
 
@@ -267,12 +272,13 @@ const clockText = time => new Date(time).toLocaleTimeString(dateLocale(), { hour
 
 function StatusBar({ state, snapshot, now, onRefresh }) {
   const { loading, at } = snapshot
-  const detail = state.reasons.length > 0 ? state.reasons.slice(0, 3).join(' · ') : null
+  const lines = [...state.reasons, ...(state.advisory ?? [])].slice(0, 3)
+  const detail = lines.length > 0 ? lines.join(' · ') : null
   return h('div', { className: 'bt-fab-bar' },
     h('div', { className: 'bt-fab-overall' },
       h(Dot, { tone: levelTone(state.level) }),
       h('div', { className: 'bt-fab-overall-copy' },
-        h('strong', null, levelText(state.level)),
+        h('strong', null, levelText(state.level, { strained: (state.advisory ?? []).length > 0 })),
         detail ? h('span', { className: 'bt-fab-sub' }, detail) : null)),
     h('div', { className: 'bt-fab-bar-actions' },
       at > 0 ? h('span', { className: 'bt-fab-updated', title: clockText(at) }, t('Updated {time}', { time: agoText(at, now) })) : null,

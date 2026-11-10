@@ -129,6 +129,22 @@ export function hostMeters(host) {
   }
 }
 
+// What a busy host adds to the headline without changing the state: load above one task
+// per core, memory at 90% used or more, or a disk at 92% or more. Each note is
+// {kind, text}; the service, peer and section checks alone decide ok, degraded or down.
+export const PRESSURE = { memory: 0.9, disk: 92 }
+export function pressureNotes(host) {
+  if (host?.ok !== true) return []
+  const meters = hostMeters(host)
+  const notes = []
+  if (meters?.load && meters.load.one > meters.cpus) notes.push({ kind: 'load', text: t('{host} is under heavy load', { host: host.hostname || t('This host') }) })
+  if (meters?.memory && !meters.memory.mac && meters.memory.fraction !== null && meters.memory.fraction >= PRESSURE.memory) notes.push({ kind: 'memory', text: t('Memory is nearly full') })
+  for (const disk of host.disks ?? []) {
+    if (Number.isFinite(disk.usedPct) && disk.usedPct >= PRESSURE.disk) notes.push({ kind: 'disk', text: t('Disk {mount} is nearly full', { mount: disk.mount }) })
+  }
+  return notes
+}
+
 // ---- states -----------------------------------------------------------------------------
 
 // What a section says when its tool is simply not on this machine. That is a fact about the
@@ -186,8 +202,8 @@ export function unitState(state) {
 //   degraded something is wrong or unreadable: a peer, a section, a service, a full disk
 //   down     the fabric's own service is not running, or nothing could be read at all
 export function deriveState(value, { failed = false } = {}) {
-  if (value === null || value === undefined) return { level: 'unknown', reasons: failed ? [t('The status could not be read')] : [] }
-  if (value.enabled === false) return { level: 'off', reasons: [] }
+  if (value === null || value === undefined) return { level: 'unknown', reasons: failed ? [t('The status could not be read')] : [], advisory: [] }
+  if (value.enabled === false) return { level: 'off', reasons: [], advisory: [] }
   const down = []
   const warn = []
   if (typeof value.error === 'string' && value.error !== '') down.push(t('The status could not be read'))
@@ -224,14 +240,17 @@ export function deriveState(value, { failed = false } = {}) {
   if (sections.length > 0 && sections.every(section => section?.ok === false) && !sections.every(isAbsent)) down.push(t('Nothing could be read'))
   if (failed) warn.push(t('The last refresh failed'))
   const level = down.length > 0 ? 'down' : warn.length > 0 ? 'degraded' : 'ok'
-  return { level, reasons: [...down, ...warn] }
+  // A disk at 92% already reads as a reason above (90% and up), so it is not said twice.
+  const advisory = pressureNotes(host).filter(note => note.kind !== 'disk' || level === 'ok').map(note => note.text).slice(0, 2)
+  return { level, reasons: [...down, ...warn], advisory }
 }
 
 export const levelTone = level => (level === 'ok' ? 'ok' : level === 'degraded' ? 'warn' : level === 'down' ? 'bad' : 'muted')
 
-export function levelText(level) {
+// `strained`: the level is ok but the host is busy, so "normal" would overstate it.
+export function levelText(level, { strained = false } = {}) {
   switch (level) {
-    case 'ok': return t('All systems normal')
+    case 'ok': return strained ? t('All systems reachable') : t('All systems normal')
     case 'degraded': return t('Degraded')
     case 'down': return t('Down')
     case 'off': return t('Turned off')
@@ -240,12 +259,27 @@ export function levelText(level) {
 }
 
 // The chip's accessible name: the state, then up to three reasons.
-export function chipLabel({ level, reasons }) {
-  const head = t('Fabric: {state}', { state: levelText(level).toLowerCase() })
+export function chipLabel({ level, reasons, advisory = [] }) {
+  const head = t('Fabric: {state}', { state: levelText(level, { strained: advisory.length > 0 }).toLowerCase() })
   return [head, ...reasons.slice(0, 3)].join('. ')
 }
 
 // ---- SIEVE ------------------------------------------------------------------------------
+
+// An ingress row's title from its stats URL: the two known ingress ports by role, any other
+// by host:port. `ingressAddress` is the URL's host and port, never its path.
+export function ingressAddress(url) {
+  const text = String(url ?? '')
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(text)?.[1]
+  const host = authority?.slice(authority.lastIndexOf('@') + 1)
+  return host ? host : text
+}
+export function ingressTitle(url) {
+  const port = /:(\d+)$/.exec(ingressAddress(url))?.[1]
+  if (port === '8898') return t('Optimizer ingress')
+  if (port === '8899') return t('Fabric ingress')
+  return ingressAddress(url)
+}
 
 // How much of the tool output SIEVE kept out of the model's context: bytes in, bytes out, the
 // share saved. `fraction` is null when nothing went in.

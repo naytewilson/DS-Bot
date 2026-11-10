@@ -18,7 +18,7 @@ import { hostText, t } from './i18n.js'
 import { clientErrors } from './diagnostics.js'
 import { showsDshRow } from './dsh-offer.js'
 import { quietly } from './diagnostics.js'
-import { frameLayout, dragColumn, RAIL_WIDTH, FALLBACK_SIDEBAR_WIDTH, userSidebarToggle } from './frame-layout.js'
+import { frameLayout, dragColumn, isPhone, phoneDrawerWidth, RAIL_WIDTH, FALLBACK_SIDEBAR_WIDTH, userSidebarToggle } from './frame-layout.js'
 import { chatRoom, dshCollapsed } from './frame-watch.js'
 
 // -------------------------------------------------------------------------
@@ -455,10 +455,16 @@ function useListGlide(listRef, layout, key) {
 // collapsed sidebar: the open column or the avatar rail push the conversation
 // over, the drawer floats above it. Its right edge drags the open width, and
 // down to the rail.
-function LeftColumn({ mode, width, onGrip, leaving, children }) {
-  return createPortal(h('div', { className: 'bt-leftcol', 'data-left': mode, 'data-leaving': leaving || undefined, 'aria-hidden': leaving || undefined, style: { width: `${width}px` } },
+// On a phone (`onBackdrop` set) the drawer has a dimmed backdrop that closes it, and
+// no resize grip.
+function LeftColumn({ mode, width, onGrip, onBackdrop, leaving, children }) {
+  const column = h('div', { className: 'bt-leftcol', 'data-left': mode, 'data-phone': onBackdrop ? '' : undefined, 'data-leaving': leaving || undefined, 'aria-hidden': leaving || undefined, style: { width: `${width}px` } },
     children,
-    h('div', { className: 'bt-leftcol-grip', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': t('Resize sidebar'), title: t('Resize sidebar'), onPointerDown: onGrip })), document.body)
+    onGrip ? h('div', { className: 'bt-leftcol-grip', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': t('Resize sidebar'), title: t('Resize sidebar'), onPointerDown: onGrip }) : null)
+  if (!onBackdrop) return createPortal(column, document.body)
+  return createPortal(h(Fragment, null,
+    h('div', { className: 'bt-leftcol-backdrop', 'data-leaving': leaving || undefined, 'aria-hidden': true, onClick: onBackdrop }),
+    column), document.body)
 }
 
 // The top-left switch hides the whole column and brings it back. Under a
@@ -500,6 +506,7 @@ export function TeamSidebar(props) {
   props.useRegistry(value => value)
   const frameSnap = props.useFrame ? props.useFrame(value => value) : { viewport: typeof window === 'undefined' ? 0 : window.innerWidth, sidebarWidth: FALLBACK_SIDEBAR_WIDTH, collapsedWidth: 0 }
   const pref = props.useSidebarPref ? props.useSidebarPref(value => value) : 'open'
+  const phone = isPhone(frameSnap.viewport)
   const layout = frameLayout({
     viewport: frameSnap.viewport, sidebarWidth: frameSnap.sidebarWidth,
     pref, drawer: leftDrawer,
@@ -574,8 +581,9 @@ export function TeamSidebar(props) {
   // collapsed track; a drawer floats over the rail's place, so it pushes as much
   // as the rail and the chat stays put when it opens or closes.
   const openWidth = drag?.width ?? frameSnap.sidebarWidth
-  const ourWidth = shown === 'rail' ? RAIL_WIDTH : openWidth
-  const pushed = mode === 'open' ? openWidth : mode === 'hidden' ? 0 : RAIL_WIDTH
+  const ourWidth = phone ? phoneDrawerWidth(frameSnap.viewport) : shown === 'rail' ? RAIL_WIDTH : openWidth
+  // A phone's column floats and takes no room: the chat keeps the whole window.
+  const pushed = phone ? 0 : mode === 'open' ? openWidth : mode === 'hidden' ? 0 : RAIL_WIDTH
   useLayoutEffect(() => {
     if (typeof document === 'undefined') return
     chatRoom.setLeft(Math.max(0, pushed - (frameSnap.collapsedWidth ?? 0)))
@@ -735,6 +743,8 @@ export function TeamSidebar(props) {
   useEffect(() => {
     if (mode !== 'drawer') return undefined
     const onDown = (event) => {
+      // The phone's backdrop takes the press; closing here would let the click land on the chat.
+      if (phone) return
       if (event.target instanceof Element && event.target.closest('.bt-leftcol')) return
       actions.setLeftDrawer?.(false)
     }
@@ -746,7 +756,7 @@ export function TeamSidebar(props) {
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey, true)
     return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey, true) }
-  }, [mode])
+  }, [mode, phone])
 
   const navigate = (open, id) => {
     const result = open(id)
@@ -759,6 +769,9 @@ export function TeamSidebar(props) {
     openAgent: id => navigate(actions.openAgent, id),
     openAgentSession: id => navigate(actions.openAgentSession, id),
     newAgentSession: id => navigate(actions.newAgentSession, id),
+    // A dialog or the palette opens over the chat: the drawer is out of the way first.
+    openSettings: (...args) => { if (leftDrawer) actions.setLeftDrawer?.(false); return actions.openSettings?.(...args) },
+    openPalette: (...args) => { if (leftDrawer) actions.setLeftDrawer?.(false); return actions.openPalette?.(...args) },
   }
   const rowProps = { roster, actions: rowActions, useSessions, useUi, useSessionStatus: props.useSessionStatus, useSessionRetainInfo: props.useSessionRetainInfo, useActivity: props.useActivity, useWork: props.useWork, wide: wideContent }
   // Typing while the sidebar has focus starts a search.
@@ -793,7 +806,7 @@ export function TeamSidebar(props) {
         h('span', { className: 'bt-brand', role: 'img', 'aria-label': BRAND, title: BRAND }, h(BrandMark), h(BrandName)),
         h(UpdateButton, { useUpdate: props.useUpdate, actions }),
         h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New section'), title: t('New section'), onClick: createNewSection }, h(FolderIcon)),
-        h('button', { type: 'button', className: 'bt-round', 'aria-label': t('Search'), title: t('Search'), onClick: () => actions.openPalette() }, h(SearchIcon)),
+        h('button', { type: 'button', className: 'bt-round', 'aria-label': t('Search'), title: t('Search'), onClick: () => rowActions.openPalette() }, h(SearchIcon)),
         h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon)),
         h('button', { type: 'button', className: 'bt-round bt-side-collapse', 'aria-label': t('Collapse sidebar'), title: t('Collapse sidebar'), onClick: onToggle }, h(SidebarIcon)))
     : h('div', { className: 'bt-rail-top' },
@@ -805,13 +818,13 @@ export function TeamSidebar(props) {
   // The foot stands in for the shell's hidden footer: the account avatar, and on
   // the rail the new-chat button above it.
   // The Fabric chip sits beside the account avatar while the host has the Fabric view on.
-  const chip = roster.fabric === true ? h(FabricChip, { actions, rail: !wideContent }) : null
+  const chip = roster.fabric === true ? h(FabricChip, { actions: rowActions, rail: !wideContent }) : null
   const foot = wideContent
-    ? h('div', { className: 'bt-leftcol-foot' }, h(AccountLauncher, { seat: false, actions }), chip)
+    ? h('div', { className: 'bt-leftcol-foot' }, h(AccountLauncher, { seat: false, actions: rowActions }), chip)
     : h('div', { className: 'bt-leftcol-foot bt-leftcol-foot-rail' },
         h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon)),
         chip,
-        h(AccountLauncher, { seat: false, actions }))
+        h(AccountLauncher, { seat: false, actions: rowActions }))
   const content = h('div', { className: wideContent ? 'bt-side' : 'bt-side bt-rail', onKeyDown: typeToSearch },
     top,
     wideContent && roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
@@ -845,7 +858,7 @@ export function TeamSidebar(props) {
     foot)
   return h(Fragment, null,
     h(TitleToggle, { hidden: mode === 'hidden', onToggle }),
-    shown === 'hidden' ? null : h(LeftColumn, { mode: shown, width: ourWidth, onGrip: startDrag, leaving }, content))
+    shown === 'hidden' ? null : h(LeftColumn, { mode: shown, width: ourWidth, onGrip: phone ? null : startDrag, onBackdrop: phone ? () => actions.setLeftDrawer?.(false) : null, leaving }, content))
 }
 
 // The update button at the sidebar's top right: a cloud while a newer DS Bot —

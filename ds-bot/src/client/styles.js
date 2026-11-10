@@ -2,7 +2,7 @@ import { INKS } from './inks.js'
 import { DEFAULT_MASK } from './characters.js'
 import { MENTION_ORIGIN } from './text.js'
 import { SPRING_SHAPE, SPRING_TAP, SPRING_STRETCH, SPRING_POP, spring } from './motion.js'
-import { DSH_NARROW } from './frame-layout.js'
+import { DSH_NARROW, PHONE } from './frame-layout.js'
 
 // The pill stretches for "Memory updated" on SPRING_STRETCH, and its icon pops on
 // SPRING_POP; it closes on SPRING_SHAPE.
@@ -172,6 +172,17 @@ html[data-windows-titlebar] .bt-leftcol,html[data-platform=darwin] .bt-leftcol{b
 html[data-bt-collapsing] [class*="_frame"]:has(>[class*="_sidebarCol"]){transition:none!important}
 .bt-leftcol[data-left=drawer]{background:var(--bt-sidebar);box-shadow:8px 0 24px rgba(0,0,0,.14)}
 .bt-leftcol>.bt-side{width:100%}
+/* On a phone the column is only ever a drawer: wide content, over the chat and its
+   panels, behind a dimmed backdrop (a tap on it closes the drawer). Padding keeps
+   the brand row and the footer clear of the notch and the home indicator. */
+.bt-leftcol-backdrop{display:none}
+@media (max-width:${PHONE - 1}px){
+.bt-leftcol-backdrop{display:block;position:fixed;inset:0;z-index:46;background:rgba(0,0,0,.4);animation:bt-fade ${SPRING_SHAPE.duration}ms ease-out;-webkit-tap-highlight-color:transparent}
+.bt-leftcol-backdrop[data-leaving]{opacity:0;transition:opacity ${SPRING_SHAPE.duration}ms ease-out;pointer-events:none}
+.bt-leftcol[data-phone]{z-index:47;max-width:calc(100vw - ${56}px);padding:calc(max(var(--bt-lc-clear),env(safe-area-inset-top,0px)) + 6px) 12px calc(6px + env(safe-area-inset-bottom,0px)) calc(12px + env(safe-area-inset-left,0px));box-shadow:8px 0 32px rgba(0,0,0,.28)}
+.bt-leftcol[data-phone]>.bt-side{min-width:0}
+}
+@media (max-width:${PHONE - 1}px) and (prefers-reduced-motion:reduce){.bt-leftcol-backdrop{animation:none}.bt-leftcol-backdrop[data-leaving]{transition:none}}
 .bt-leftcol-foot{display:flex;align-items:center;gap:9px;padding-top:8px;flex:none}
 .bt-rail{align-items:center;gap:6px;padding:0}
 .bt-rail .bt-row{justify-content:center;width:56px;height:56px;min-height:56px;padding:0;border-radius:16px}
@@ -665,6 +676,11 @@ html[data-windows-titlebar] .bt-title-toggle:hover{background:var(--bt-hover)}
 /* Elsewhere the switch shows only while the column is hidden, where the column's
    own top row had it. */
 html:not([data-windows-titlebar]) .bt-title-toggle{position:fixed;left:12px;top:calc(var(--dsh-frame-top-clearance,0px) + 6px);z-index:30}
+/* On a phone the switch is the way to the drawer: a 40px target that covers the
+   shell's own switch under it at the same corner, clear of the notch. */
+@media (max-width:${PHONE - 1}px){
+html:not([data-windows-titlebar]) .bt-title-toggle{width:40px;height:40px;left:calc(8px + env(safe-area-inset-left,0px));top:calc(max(var(--dsh-frame-top-clearance,0px),env(safe-area-inset-top,0px)) + 4px)}
+}
 /* The footer ends in the Bot row: the whale's settings seat, then the account menu
    when no plugin holds that seat. Every other plugin's entry takes a whole row above
    it, in the shell's order, so none of them squeezes the Bot row. */
@@ -1070,6 +1086,10 @@ header[class*="_header"]:has(.bt-head){position:absolute!important;top:0;left:0;
 header[class*="_header"]:has(.bt-head)::before{content:"";position:absolute;inset:0 0 auto;height:calc(60px + env(safe-area-inset-top,0px));background:linear-gradient(to bottom,var(--bt-main),color-mix(in srgb,var(--bt-main) 0%,transparent));pointer-events:none;z-index:-1}
 header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{position:absolute;left:12px;top:10px;pointer-events:auto}
 header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
+@media (max-width:${PHONE - 1}px){
+header[class*="_header"]:has(.bt-head){padding-top:calc(10px + env(safe-area-inset-top,0px))!important}
+header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{top:calc(10px + env(safe-area-inset-top,0px));left:calc(12px + env(safe-area-inset-left,0px))}
+}
 /* On macOS the shell's header row is the window's drag strip (data-window-drag
    becomes -webkit-app-region:drag). The floating header stays click-through, so
    the transcript under it still takes links and the wheel. Only the 40px .bt-head

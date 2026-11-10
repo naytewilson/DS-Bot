@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   agoText, bytesText, chipLabel, createFabricFeed, deriveState, durationText, errorText, harnessRows, hostMeters, hubGroups,
-  isAbsent, latencyText, levelText, levelTone, metricLabel, metricValue, percentText, poll, savings, sinceText, unitState, usageTone,
+  ingressAddress, ingressTitle, isAbsent, latencyText, levelText, levelTone, metricLabel, metricValue, percentText, poll, pressureNotes, savings, sinceText, unitState, usageTone,
 } from '../src/client/fabric-data.js'
 import { healthy } from './fabric-fixture.js'
 
@@ -114,18 +114,18 @@ test('the host card turns the numbers into meters, and a Mac\'s memory is a size
 })
 
 test('a healthy status is ok, and each kind of trouble moves it the right way', () => {
-  assert.deepEqual(deriveState(healthy()), { level: 'ok', reasons: [] })
+  assert.deepEqual(deriveState(healthy()), { level: 'ok', reasons: [], advisory: [] })
   const reasons = value => deriveState(value).reasons
   // A peer that does not answer.
   const peerDown = { ...healthy(), peers: [{ name: 'Neo', ok: false, error: 'exit 255: no route' }] }
-  assert.deepEqual(deriveState(peerDown), { level: 'degraded', reasons: ['Neo is unreachable'] })
+  assert.deepEqual(deriveState(peerDown), { level: 'degraded', reasons: ['Neo is unreachable'], advisory: [] })
   // The fabric's own unit stopped or failed: down. Starting or reloading: only a pause.
   assert.equal(deriveState({ ...healthy(), service: { ok: false, unit: 'anvil-dsh-fabric.service', state: 'failed' } }).level, 'down')
   assert.deepEqual(reasons({ ...healthy(), service: { ok: false, unit: 'anvil-dsh-fabric.service', state: 'failed' } }), ['anvil-dsh-fabric.service is failed'])
   assert.equal(deriveState({ ...healthy(), service: { ok: false, unit: 'u', state: 'inactive' } }).level, 'down')
   assert.equal(deriveState({ ...healthy(), service: { ok: false, unit: 'u', state: 'activating' } }).level, 'degraded')
   // A probe that failed on its own.
-  assert.deepEqual(deriveState({ ...healthy(), hub: { ok: false, error: 'timed out after 10 s' } }), { level: 'degraded', reasons: ['The ANVIL hub could not be read'] })
+  assert.deepEqual(deriveState({ ...healthy(), hub: { ok: false, error: 'timed out after 10 s' } }), { level: 'degraded', reasons: ['The ANVIL hub could not be read'], advisory: [] })
   assert.deepEqual(reasons({ ...healthy(), os: { ok: false, error: 'exit 1' } }), ['ANVIL OS could not be read'])
   assert.deepEqual(reasons({ ...healthy(), sieve: { ok: false, error: 'no SIEVE data', output: { ok: false }, ingress: [] } }), ['SIEVE could not be read'])
   assert.deepEqual(reasons({ ...healthy(), host: { ok: false, error: 'boom' } }), ['This host could not be read'])
@@ -133,7 +133,7 @@ test('a healthy status is ok, and each kind of trouble moves it the right way', 
   // A disk nearly full, and a failed ANVIL OS unit.
   const full = healthy()
   full.host.disks[1].usedPct = 94
-  assert.deepEqual(deriveState(full), { level: 'degraded', reasons: ['/srv/archive is 94% full'] })
+  assert.deepEqual(deriveState(full), { level: 'degraded', reasons: ['/srv/archive is 94% full'], advisory: [] })
   const failedUnit = healthy()
   failedUnit.os.services[1].state = 'failed'
   assert.deepEqual(reasons(failedUnit), ['1 ANVIL OS services have failed'])
@@ -143,7 +143,7 @@ test('a healthy status is ok, and each kind of trouble moves it the right way', 
   assert.equal(deriveState(idle).level, 'ok')
   // Worse trouble first.
   const both = { ...peerDown, service: { ok: false, unit: 'u', state: 'failed' } }
-  assert.deepEqual(deriveState(both), { level: 'down', reasons: ['u is failed', 'Neo is unreachable'] })
+  assert.deepEqual(deriveState(both), { level: 'down', reasons: ['u is failed', 'Neo is unreachable'], advisory: [] })
 })
 
 test('a section that is simply not on this machine never turns the state yellow', () => {
@@ -155,7 +155,7 @@ test('a section that is simply not on this machine never turns the state yellow'
     sieve: { ok: false, error: 'not installed', output: { ok: false, error: 'not installed' }, ingress: [] },
     hub: { ok: false, error: 'not installed' },
   }
-  assert.deepEqual(deriveState(mac), { level: 'ok', reasons: [] })
+  assert.deepEqual(deriveState(mac), { level: 'ok', reasons: [], advisory: [] })
   // But every section failing for a real reason is the machines being out of reach.
   const dark = {
     ...healthy(), host: { ok: false, error: 'a' }, hub: { ok: false, error: 'b' }, os: { ok: false, error: 'c' },
@@ -166,11 +166,11 @@ test('a section that is simply not on this machine never turns the state yellow'
 })
 
 test('no status yet is unknown, a turned-off view is off, a status that failed to build is down, a failed refresh adds a reason', () => {
-  assert.deepEqual(deriveState(null), { level: 'unknown', reasons: [] })
-  assert.deepEqual(deriveState(null, { failed: true }), { level: 'unknown', reasons: ['The status could not be read'] })
-  assert.deepEqual(deriveState({ enabled: false }), { level: 'off', reasons: [] })
-  assert.deepEqual(deriveState({ enabled: true, error: 'boom' }), { level: 'down', reasons: ['The status could not be read'] })
-  assert.deepEqual(deriveState(healthy(), { failed: true }), { level: 'degraded', reasons: ['The last refresh failed'] })
+  assert.deepEqual(deriveState(null), { level: 'unknown', reasons: [], advisory: [] })
+  assert.deepEqual(deriveState(null, { failed: true }), { level: 'unknown', reasons: ['The status could not be read'], advisory: [] })
+  assert.deepEqual(deriveState({ enabled: false }), { level: 'off', reasons: [], advisory: [] })
+  assert.deepEqual(deriveState({ enabled: true, error: 'boom' }), { level: 'down', reasons: ['The status could not be read'], advisory: [] })
+  assert.deepEqual(deriveState(healthy(), { failed: true }), { level: 'degraded', reasons: ['The last refresh failed'], advisory: [] })
 })
 
 test('the chip\'s name says the state, then up to three reasons', () => {
@@ -336,4 +336,47 @@ test('a poll whose run rejects does not stop the polling', async () => {
   await tick()
   assert.equal(runs, 2)
   assert.equal(c.pending().length, 1)
+})
+
+test('a busy host says so beside the state, and the state itself does not change', () => {
+  const busy = (host) => ({ ...healthy(), host: { ...healthy().host, ...host } })
+  // Observed: load 30 on 16 cores, memory 93% used.
+  const saturated = deriveState(busy({ cpus: 16, load: [30, 28, 20], memory: { totalBytes: 100 * GB, availableBytes: 7 * GB } }))
+  assert.equal(saturated.level, 'ok')
+  assert.deepEqual(saturated.reasons, [])
+  assert.deepEqual(saturated.advisory, ['node-02 is under heavy load', 'Memory is nearly full'])
+  assert.equal(levelText('ok', { strained: true }), 'All systems reachable')
+  assert.equal(levelText('ok'), 'All systems normal')
+  assert.equal(chipLabel(saturated), 'Fabric: all systems reachable')
+  assert.deepEqual(deriveState(healthy()).advisory, [])
+  // Exactly one task per core is busy, not strained; memory at 90% is the line.
+  assert.deepEqual(pressureNotes(busy({ cpus: 8, load: [8, 8, 8] }).host), [])
+  assert.deepEqual(pressureNotes(busy({ cpus: 8, load: [8.01, 8, 8] }).host).map(note => note.kind), ['load'])
+  assert.deepEqual(pressureNotes(busy({ memory: { totalBytes: 100 * GB, availableBytes: 10 * GB } }).host).map(note => note.kind), ['memory'])
+  assert.deepEqual(pressureNotes(busy({ memory: { totalBytes: 100 * GB, availableBytes: 10.5 * GB } }).host), [])
+  // A disk at 92% is named, and a host that could not be read says nothing.
+  const full = busy({ disks: [{ mount: '/data', sizeBytes: GB, availBytes: 0, usedPct: 92 }] })
+  assert.deepEqual(pressureNotes(full.host).map(note => note.text), ['Disk /data is nearly full'])
+  assert.deepEqual(pressureNotes({ ok: false }), [])
+  // Up to two are said; a disk that already reads as a reason (90% and up) is not said twice.
+  const everything = deriveState(busy({ cpus: 2, load: [9, 9, 9], memory: { totalBytes: 100 * GB, availableBytes: GB }, disks: [{ mount: '/data', sizeBytes: GB, availBytes: 0, usedPct: 95 }] }))
+  assert.equal(everything.level, 'degraded')
+  assert.deepEqual(everything.reasons, ['/data is 95% full'])
+  assert.deepEqual(everything.advisory, ['node-02 is under heavy load', 'Memory is nearly full'])
+  assert.deepEqual(deriveState(full).advisory, [])
+  assert.deepEqual(deriveState(full).reasons, ['/data is 92% full'])
+})
+
+test('a Mac without a memory measurement never reads as memory pressure', () => {
+  const mac = { ...healthy(), host: { ...healthy().host, platform: 'darwin', memory: { totalBytes: 8 * GB, availableBytes: 0.1 * GB } } }
+  assert.deepEqual(pressureNotes(mac.host), [])
+})
+
+test('an ingress row is titled by the role of its port, else by host:port, never by its path', () => {
+  assert.equal(ingressTitle('http://127.0.0.1:8898/sieve/stats'), 'Optimizer ingress')
+  assert.equal(ingressTitle('http://127.0.0.1:8899/sieve/stats'), 'Fabric ingress')
+  assert.equal(ingressTitle('http://10.0.0.5:9000/sieve/stats'), '10.0.0.5:9000')
+  assert.equal(ingressAddress('http://127.0.0.1:8898/sieve/stats'), '127.0.0.1:8898')
+  assert.equal(ingressAddress('http://user:pw@host:1/x?y#z'), 'host:1')
+  assert.equal(ingressAddress('not a url'), 'not a url')
 })

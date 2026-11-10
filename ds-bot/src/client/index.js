@@ -10,7 +10,7 @@ import { lookOf } from './mark.js'
 import { TeamSidebar, YouAvatar, AccountLauncher, FooterAccount, BotReturn, SIDEBAR_CSS, RETURN_CSS, holdShellShortcuts } from './sidebar.js'
 import { BrandMark, BrandName, HeroMark, BRAND_CSS, installTitleGuard } from './brand.js'
 import { installSettingsShell, SETTINGS_SHELL_CSS } from './settings-shell.js'
-import { frameLayout, readSidebar, writeSidebar, toggledPref, DSH_NARROW } from './frame-layout.js'
+import { frameLayout, readSidebar, writeSidebar, switchResult, isPhone, DSH_NARROW } from './frame-layout.js'
 import { installFrameWatch } from './frame-watch.js'
 import { HeaderPill } from './header.js'
 import { ComposerPlus, ComposerVoice, menuIcons } from './composer.js'
@@ -564,9 +564,12 @@ export function apply(ctx) {
       writeSidebar(sidebarSaved)
       sidebarPref.set(next)
     },
+    // On a phone the switch opens and closes the drawer and leaves the saved
+    // preference alone (see switchResult).
     toggleLeftHidden: () => {
-      ui.set(state => (state.leftDrawer || state.panelYield ? { ...state, leftDrawer: false, panelYield: false } : state))
-      actions.setSidebarPref(toggledPref(sidebarPref.getSnapshot(), sidebarSaved.shown))
+      const next = switchResult({ viewport: frame.getSnapshot().viewport, pref: sidebarPref.getSnapshot(), shown: sidebarSaved.shown, drawer: ui.getSnapshot().leftDrawer === true, panelYield: ui.getSnapshot().panelYield === true })
+      ui.set(state => (state.leftDrawer === next.drawer && (state.panelYield === true) === next.panelYield ? state : { ...state, leftDrawer: next.drawer, panelYield: next.panelYield }))
+      if (next.pref !== sidebarPref.getSnapshot()) actions.setSidebarPref(next.pref)
     },
     setSidebarWidth: (width) => {
       sidebarSaved = { ...sidebarSaved, width }
@@ -1006,9 +1009,18 @@ export function apply(ctx) {
   // their flags.
   const installFrameSync = () => {
     let lastDetails = ui.getSnapshot().details
+    let wasPhone = isPhone(frame.getSnapshot().viewport)
     const sync = () => {
       const s = ui.getSnapshot()
       const f = frame.getSnapshot()
+      // Crossing the phone line (a rotation, a resize) never carries a drawer over.
+      const phone = isPhone(f.viewport)
+      if (phone !== wasPhone) {
+        wasPhone = phone
+        if (s.leftDrawer === true) { actions.setLeftDrawer(false); return }
+      }
+      // On a phone the drawer is in the way of whatever opens over the chat.
+      if (phone && s.leftDrawer === true && (s.settings || s.palette || s.newChat)) { actions.setLeftDrawer(false); return }
       // Only a fresh open counts: a folded panel that just follows the chat to
       // another subject is not the user asking to see it — the openers in
       // team-actions carry the yield themselves.

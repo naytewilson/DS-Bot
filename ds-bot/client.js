@@ -1281,6 +1281,12 @@ var ZH = {
   "Nothing could be read": "什么都读不到",
   "The last refresh failed": "上次刷新失败",
   "All systems normal": "一切正常",
+  "All systems reachable": "所有系统均可连接",
+  "{host} is under heavy load": "{host} 负载过高",
+  "Memory is nearly full": "内存快满了",
+  "Disk {mount} is nearly full": "磁盘 {mount} 快满了",
+  "Optimizer ingress": "优化器入口",
+  "Fabric ingress": "Fabric 入口",
   "Degraded": "部分异常",
   "Down": "不可用",
   "Turned off": "已关闭",
@@ -3193,11 +3199,20 @@ var MIN_CHAT = 420;
 var RAIL_WIDTH = 88;
 var PANEL_MIN = { details: 320, browser: 360, side: 320 };
 var DSH_NARROW = 1024;
+var PHONE = 640;
+var PHONE_GUTTER = 56;
+var PHONE_DRAWER_MAX = 320;
+var isPhone = (viewport) => viewport > 0 && viewport < PHONE;
+var phoneDrawerWidth = (viewport) => Math.max(0, Math.min(viewport - PHONE_GUTTER, PHONE_DRAWER_MAX));
 var SIDEBAR_MIN = 264;
 var SIDEBAR_MAX = 420;
 var FALLBACK_SIDEBAR_WIDTH = 280;
 var RAIL_SNAP = (RAIL_WIDTH + SIDEBAR_MIN) / 2;
 function frameLayout({ viewport, sidebarWidth, pref, drawer = false, panel = null }) {
+  if (isPhone(viewport)) {
+    const panelState2 = panel === null ? "none" : panel.yielded === true ? "overlay" : "folded";
+    return { left: drawer ? "drawer" : "hidden", panel: panelState2, column: 0, room: Math.max(0, viewport) };
+  }
   const fits = pref === "open" && viewport >= sidebarWidth + MIN_CHAT;
   let left = pref === "hidden" ? "hidden" : fits ? "open" : drawer && pref === "open" ? "drawer" : "rail";
   let occupied = left === "open" ? sidebarWidth : left === "hidden" ? 0 : RAIL_WIDTH;
@@ -3220,6 +3235,10 @@ function dragColumn(x, viewport) {
   const docks = viewport >= SIDEBAR_MIN + MIN_CHAT;
   const high = docks ? Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, viewport - MIN_CHAT)) : SIDEBAR_MAX;
   return { left: docks ? "open" : "drawer", width: Math.round(Math.max(SIDEBAR_MIN, Math.min(x, high))) };
+}
+function switchResult({ viewport, pref, shown, drawer, panelYield }) {
+  if (isPhone(viewport)) return { pref, drawer: !drawer, panelYield };
+  return { pref: toggledPref(pref, shown), drawer: false, panelYield: false };
 }
 var toggledPref = (pref, shown) => pref === "hidden" ? shown : "hidden";
 var RESIZE_SETTLE_MS = 500;
@@ -3403,6 +3422,17 @@ html[data-windows-titlebar] .bt-leftcol,html[data-platform=darwin] .bt-leftcol{b
 html[data-bt-collapsing] [class*="_frame"]:has(>[class*="_sidebarCol"]){transition:none!important}
 .bt-leftcol[data-left=drawer]{background:var(--bt-sidebar);box-shadow:8px 0 24px rgba(0,0,0,.14)}
 .bt-leftcol>.bt-side{width:100%}
+/* On a phone the column is only ever a drawer: wide content, over the chat and its
+   panels, behind a dimmed backdrop (a tap on it closes the drawer). Padding keeps
+   the brand row and the footer clear of the notch and the home indicator. */
+.bt-leftcol-backdrop{display:none}
+@media (max-width:${PHONE - 1}px){
+.bt-leftcol-backdrop{display:block;position:fixed;inset:0;z-index:46;background:rgba(0,0,0,.4);animation:bt-fade ${SPRING_SHAPE.duration}ms ease-out;-webkit-tap-highlight-color:transparent}
+.bt-leftcol-backdrop[data-leaving]{opacity:0;transition:opacity ${SPRING_SHAPE.duration}ms ease-out;pointer-events:none}
+.bt-leftcol[data-phone]{z-index:47;max-width:calc(100vw - ${56}px);padding:calc(max(var(--bt-lc-clear),env(safe-area-inset-top,0px)) + 6px) 12px calc(6px + env(safe-area-inset-bottom,0px)) calc(12px + env(safe-area-inset-left,0px));box-shadow:8px 0 32px rgba(0,0,0,.28)}
+.bt-leftcol[data-phone]>.bt-side{min-width:0}
+}
+@media (max-width:${PHONE - 1}px) and (prefers-reduced-motion:reduce){.bt-leftcol-backdrop{animation:none}.bt-leftcol-backdrop[data-leaving]{transition:none}}
 .bt-leftcol-foot{display:flex;align-items:center;gap:9px;padding-top:8px;flex:none}
 .bt-rail{align-items:center;gap:6px;padding:0}
 .bt-rail .bt-row{justify-content:center;width:56px;height:56px;min-height:56px;padding:0;border-radius:16px}
@@ -3896,6 +3926,11 @@ html[data-windows-titlebar] .bt-title-toggle:hover{background:var(--bt-hover)}
 /* Elsewhere the switch shows only while the column is hidden, where the column's
    own top row had it. */
 html:not([data-windows-titlebar]) .bt-title-toggle{position:fixed;left:12px;top:calc(var(--dsh-frame-top-clearance,0px) + 6px);z-index:30}
+/* On a phone the switch is the way to the drawer: a 40px target that covers the
+   shell's own switch under it at the same corner, clear of the notch. */
+@media (max-width:${PHONE - 1}px){
+html:not([data-windows-titlebar]) .bt-title-toggle{width:40px;height:40px;left:calc(8px + env(safe-area-inset-left,0px));top:calc(max(var(--dsh-frame-top-clearance,0px),env(safe-area-inset-top,0px)) + 4px)}
+}
 /* The footer ends in the Bot row: the whale's settings seat, then the account menu
    when no plugin holds that seat. Every other plugin's entry takes a whole row above
    it, in the shell's order, so none of them squeezes the Bot row. */
@@ -4300,6 +4335,10 @@ header[class*="_header"]:has(.bt-head){position:absolute!important;top:0;left:0;
 header[class*="_header"]:has(.bt-head)::before{content:"";position:absolute;inset:0 0 auto;height:calc(60px + env(safe-area-inset-top,0px));background:linear-gradient(to bottom,var(--bt-main),color-mix(in srgb,var(--bt-main) 0%,transparent));pointer-events:none;z-index:-1}
 header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{position:absolute;left:12px;top:10px;pointer-events:auto}
 header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
+@media (max-width:${PHONE - 1}px){
+header[class*="_header"]:has(.bt-head){padding-top:calc(10px + env(safe-area-inset-top,0px))!important}
+header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{top:calc(10px + env(safe-area-inset-top,0px));left:calc(12px + env(safe-area-inset-left,0px))}
+}
 /* On macOS the shell's header row is the window's drag strip (data-window-drag
    becomes -webkit-app-region:drag). The floating header stays click-through, so
    the transcript under it still takes links and the wheel. Only the 40px .bt-head
@@ -5208,6 +5247,18 @@ function hostMeters(host) {
     }))
   };
 }
+var PRESSURE = { memory: 0.9, disk: 92 };
+function pressureNotes(host) {
+  if (host?.ok !== true) return [];
+  const meters = hostMeters(host);
+  const notes = [];
+  if (meters?.load && meters.load.one > meters.cpus) notes.push({ kind: "load", text: t("{host} is under heavy load", { host: host.hostname || t("This host") }) });
+  if (meters?.memory && !meters.memory.mac && meters.memory.fraction !== null && meters.memory.fraction >= PRESSURE.memory) notes.push({ kind: "memory", text: t("Memory is nearly full") });
+  for (const disk of host.disks ?? []) {
+    if (Number.isFinite(disk.usedPct) && disk.usedPct >= PRESSURE.disk) notes.push({ kind: "disk", text: t("Disk {mount} is nearly full", { mount: disk.mount }) });
+  }
+  return notes;
+}
 var ABSENT = /* @__PURE__ */ new Set(["not installed", "not available on this platform", "not configured"]);
 var isAbsent = (section) => section?.ok === false && ABSENT.has(String(section.error ?? ""));
 function errorText(error) {
@@ -5270,8 +5321,8 @@ function unitState(state) {
   }
 }
 function deriveState(value, { failed = false } = {}) {
-  if (value === null || value === void 0) return { level: "unknown", reasons: failed ? [t("The status could not be read")] : [] };
-  if (value.enabled === false) return { level: "off", reasons: [] };
+  if (value === null || value === void 0) return { level: "unknown", reasons: failed ? [t("The status could not be read")] : [], advisory: [] };
+  if (value.enabled === false) return { level: "off", reasons: [], advisory: [] };
   const down = [];
   const warn = [];
   if (typeof value.error === "string" && value.error !== "") down.push(t("The status could not be read"));
@@ -5306,13 +5357,14 @@ function deriveState(value, { failed = false } = {}) {
   if (sections.length > 0 && sections.every((section) => section?.ok === false) && !sections.every(isAbsent)) down.push(t("Nothing could be read"));
   if (failed) warn.push(t("The last refresh failed"));
   const level = down.length > 0 ? "down" : warn.length > 0 ? "degraded" : "ok";
-  return { level, reasons: [...down, ...warn] };
+  const advisory = pressureNotes(host).filter((note) => note.kind !== "disk" || level === "ok").map((note) => note.text).slice(0, 2);
+  return { level, reasons: [...down, ...warn], advisory };
 }
 var levelTone = (level) => level === "ok" ? "ok" : level === "degraded" ? "warn" : level === "down" ? "bad" : "muted";
-function levelText(level) {
+function levelText(level, { strained = false } = {}) {
   switch (level) {
     case "ok":
-      return t("All systems normal");
+      return strained ? t("All systems reachable") : t("All systems normal");
     case "degraded":
       return t("Degraded");
     case "down":
@@ -5323,9 +5375,21 @@ function levelText(level) {
       return t("Checking…");
   }
 }
-function chipLabel({ level, reasons }) {
-  const head = t("Fabric: {state}", { state: levelText(level).toLowerCase() });
+function chipLabel({ level, reasons, advisory = [] }) {
+  const head = t("Fabric: {state}", { state: levelText(level, { strained: advisory.length > 0 }).toLowerCase() });
   return [head, ...reasons.slice(0, 3)].join(". ");
+}
+function ingressAddress(url) {
+  const text = String(url ?? "");
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(text)?.[1];
+  const host = authority?.slice(authority.lastIndexOf("@") + 1);
+  return host ? host : text;
+}
+function ingressTitle(url) {
+  const port = /:(\d+)$/.exec(ingressAddress(url))?.[1];
+  if (port === "8898") return t("Optimizer ingress");
+  if (port === "8899") return t("Fabric ingress");
+  return ingressAddress(url);
 }
 function savings(row) {
   const inBytes = Number.isFinite(row?.inBytes) ? row.inBytes : 0;
@@ -5726,10 +5790,13 @@ function HarnessRow({ row }) {
   );
 }
 function IngressRow({ entry }) {
+  const title = ingressTitle(entry.url);
+  const address = ingressAddress(entry.url);
   const detail = [
     Number.isFinite(entry.uptimeMs) ? t("Up {time}", { time: durationText(entry.uptimeMs / 1e3) }) : null,
     Number.isFinite(entry.requestsToday) ? t("{count} requests today", { count: countText(entry.requestsToday) }) : null
   ].filter(Boolean);
+  const secondary = [title === address ? null : (0, import_react5.createElement)("span", { key: "address", className: "bt-fab-mono" }, address), ...entry.ok ? detail : [errorText(entry.error)]].filter((part) => part !== null);
   return (0, import_react5.createElement)(
     "div",
     { className: "bt-fab-row" },
@@ -5737,8 +5804,8 @@ function IngressRow({ entry }) {
     (0, import_react5.createElement)(
       "div",
       { className: "bt-fab-row-main" },
-      (0, import_react5.createElement)("span", { className: "bt-fab-name bt-fab-mono", title: entry.url }, entry.url),
-      entry.ok ? detail.length > 0 ? (0, import_react5.createElement)("span", { className: "bt-fab-hint" }, detail.join(" · ")) : null : (0, import_react5.createElement)("span", { className: "bt-fab-hint" }, errorText(entry.error))
+      (0, import_react5.createElement)("span", { className: title === address ? "bt-fab-name bt-fab-mono" : "bt-fab-name", title: address }, title),
+      secondary.length > 0 ? (0, import_react5.createElement)("span", { className: "bt-fab-hint" }, secondary.flatMap((part, index) => index === 0 ? [part] : [" · ", part])) : null
     ),
     (0, import_react5.createElement)("span", { className: "bt-fab-meta" }, entry.ok ? t("Healthy") : t("Down"))
   );
@@ -5769,7 +5836,8 @@ function SieveSection({ value, now, Section: Section2 }) {
 var clockText = (time) => new Date(time).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 function StatusBar({ state, snapshot, now, onRefresh }) {
   const { loading, at } = snapshot;
-  const detail = state.reasons.length > 0 ? state.reasons.slice(0, 3).join(" · ") : null;
+  const lines = [...state.reasons, ...state.advisory ?? []].slice(0, 3);
+  const detail = lines.length > 0 ? lines.join(" · ") : null;
   return (0, import_react5.createElement)(
     "div",
     { className: "bt-fab-bar" },
@@ -5780,7 +5848,7 @@ function StatusBar({ state, snapshot, now, onRefresh }) {
       (0, import_react5.createElement)(
         "div",
         { className: "bt-fab-overall-copy" },
-        (0, import_react5.createElement)("strong", null, levelText(state.level)),
+        (0, import_react5.createElement)("strong", null, levelText(state.level, { strained: (state.advisory ?? []).length > 0 })),
         detail ? (0, import_react5.createElement)("span", { className: "bt-fab-sub" }, detail) : null
       )
     ),
@@ -16949,12 +17017,19 @@ function useListGlide(listRef, layout, key) {
     tops.current = { layout, map: next };
   }, [layout, key]);
 }
-function LeftColumn({ mode, width, onGrip, leaving, children }) {
-  return (0, import_react_dom5.createPortal)((0, import_react36.createElement)(
+function LeftColumn({ mode, width, onGrip, onBackdrop, leaving, children }) {
+  const column = (0, import_react36.createElement)(
     "div",
-    { className: "bt-leftcol", "data-left": mode, "data-leaving": leaving || void 0, "aria-hidden": leaving || void 0, style: { width: `${width}px` } },
+    { className: "bt-leftcol", "data-left": mode, "data-phone": onBackdrop ? "" : void 0, "data-leaving": leaving || void 0, "aria-hidden": leaving || void 0, style: { width: `${width}px` } },
     children,
-    (0, import_react36.createElement)("div", { className: "bt-leftcol-grip", role: "separator", "aria-orientation": "vertical", "aria-label": t("Resize sidebar"), title: t("Resize sidebar"), onPointerDown: onGrip })
+    onGrip ? (0, import_react36.createElement)("div", { className: "bt-leftcol-grip", role: "separator", "aria-orientation": "vertical", "aria-label": t("Resize sidebar"), title: t("Resize sidebar"), onPointerDown: onGrip }) : null
+  );
+  if (!onBackdrop) return (0, import_react_dom5.createPortal)(column, document.body);
+  return (0, import_react_dom5.createPortal)((0, import_react36.createElement)(
+    import_react36.Fragment,
+    null,
+    (0, import_react36.createElement)("div", { className: "bt-leftcol-backdrop", "data-leaving": leaving || void 0, "aria-hidden": true, onClick: onBackdrop }),
+    column
   ), document.body);
 }
 function TitleToggle({ hidden, onToggle }) {
@@ -16988,6 +17063,7 @@ function TeamSidebar(props) {
   props.useRegistry((value) => value);
   const frameSnap = props.useFrame ? props.useFrame((value) => value) : { viewport: typeof window === "undefined" ? 0 : window.innerWidth, sidebarWidth: FALLBACK_SIDEBAR_WIDTH, collapsedWidth: 0 };
   const pref = props.useSidebarPref ? props.useSidebarPref((value) => value) : "open";
+  const phone = isPhone(frameSnap.viewport);
   const layout = frameLayout({
     viewport: frameSnap.viewport,
     sidebarWidth: frameSnap.sidebarWidth,
@@ -17059,8 +17135,8 @@ function TeamSidebar(props) {
     }).catch((error) => actions.reportError(error, "section"));
   };
   const openWidth = drag?.width ?? frameSnap.sidebarWidth;
-  const ourWidth = shown === "rail" ? RAIL_WIDTH : openWidth;
-  const pushed = mode === "open" ? openWidth : mode === "hidden" ? 0 : RAIL_WIDTH;
+  const ourWidth = phone ? phoneDrawerWidth(frameSnap.viewport) : shown === "rail" ? RAIL_WIDTH : openWidth;
+  const pushed = phone ? 0 : mode === "open" ? openWidth : mode === "hidden" ? 0 : RAIL_WIDTH;
   (0, import_react36.useLayoutEffect)(() => {
     if (typeof document === "undefined") return;
     chatRoom.setLeft(Math.max(0, pushed - (frameSnap.collapsedWidth ?? 0)));
@@ -17207,6 +17283,7 @@ function TeamSidebar(props) {
   (0, import_react36.useEffect)(() => {
     if (mode !== "drawer") return void 0;
     const onDown = (event) => {
+      if (phone) return;
       if (event.target instanceof Element && event.target.closest(".bt-leftcol")) return;
       actions.setLeftDrawer?.(false);
     };
@@ -17221,7 +17298,7 @@ function TeamSidebar(props) {
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey, true);
     };
-  }, [mode]);
+  }, [mode, phone]);
   const navigate = (open, id) => {
     const result = open(id);
     if (leftDrawer) actions.setLeftDrawer?.(false);
@@ -17232,7 +17309,16 @@ function TeamSidebar(props) {
     openSession: (id) => navigate(actions.openSession, id),
     openAgent: (id) => navigate(actions.openAgent, id),
     openAgentSession: (id) => navigate(actions.openAgentSession, id),
-    newAgentSession: (id) => navigate(actions.newAgentSession, id)
+    newAgentSession: (id) => navigate(actions.newAgentSession, id),
+    // A dialog or the palette opens over the chat: the drawer is out of the way first.
+    openSettings: (...args) => {
+      if (leftDrawer) actions.setLeftDrawer?.(false);
+      return actions.openSettings?.(...args);
+    },
+    openPalette: (...args) => {
+      if (leftDrawer) actions.setLeftDrawer?.(false);
+      return actions.openPalette?.(...args);
+    }
   };
   const rowProps = { roster, actions: rowActions, useSessions, useUi, useSessionStatus: props.useSessionStatus, useSessionRetainInfo: props.useSessionRetainInfo, useActivity: props.useActivity, useWork: props.useWork, wide: wideContent };
   const typeToSearch = (event) => {
@@ -17262,7 +17348,7 @@ function TeamSidebar(props) {
     (0, import_react36.createElement)("span", { className: "bt-brand", role: "img", "aria-label": BRAND, title: BRAND }, (0, import_react36.createElement)(BrandMark), (0, import_react36.createElement)(BrandName)),
     (0, import_react36.createElement)(UpdateButton, { useUpdate: props.useUpdate, actions }),
     (0, import_react36.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New section"), title: t("New section"), onClick: createNewSection }, (0, import_react36.createElement)(FolderIcon)),
-    (0, import_react36.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("Search"), title: t("Search"), onClick: () => actions.openPalette() }, (0, import_react36.createElement)(SearchIcon)),
+    (0, import_react36.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("Search"), title: t("Search"), onClick: () => rowActions.openPalette() }, (0, import_react36.createElement)(SearchIcon)),
     (0, import_react36.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react36.createElement)(PlusIcon)),
     (0, import_react36.createElement)("button", { type: "button", className: "bt-round bt-side-collapse", "aria-label": t("Collapse sidebar"), title: t("Collapse sidebar"), onClick: onToggle }, (0, import_react36.createElement)(SidebarIcon))
   ) : (0, import_react36.createElement)(
@@ -17274,13 +17360,13 @@ function TeamSidebar(props) {
     main ? (0, import_react36.createElement)(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true }) : roster.ready ? null : bootFailed ? (0, import_react36.createElement)("div", { className: "bt-hint" }, bootHint()) : (0, import_react36.createElement)(BootRows, { wide: false }),
     (0, import_react36.createElement)("span", { className: "bt-rail-sep", "aria-hidden": true })
   );
-  const chip = roster.fabric === true ? (0, import_react36.createElement)(FabricChip, { actions, rail: !wideContent }) : null;
-  const foot = wideContent ? (0, import_react36.createElement)("div", { className: "bt-leftcol-foot" }, (0, import_react36.createElement)(AccountLauncher, { seat: false, actions }), chip) : (0, import_react36.createElement)(
+  const chip = roster.fabric === true ? (0, import_react36.createElement)(FabricChip, { actions: rowActions, rail: !wideContent }) : null;
+  const foot = wideContent ? (0, import_react36.createElement)("div", { className: "bt-leftcol-foot" }, (0, import_react36.createElement)(AccountLauncher, { seat: false, actions: rowActions }), chip) : (0, import_react36.createElement)(
     "div",
     { className: "bt-leftcol-foot bt-leftcol-foot-rail" },
     (0, import_react36.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react36.createElement)(PlusIcon)),
     chip,
-    (0, import_react36.createElement)(AccountLauncher, { seat: false, actions })
+    (0, import_react36.createElement)(AccountLauncher, { seat: false, actions: rowActions })
   );
   const content = (0, import_react36.createElement)(
     "div",
@@ -17329,7 +17415,7 @@ function TeamSidebar(props) {
     import_react36.Fragment,
     null,
     (0, import_react36.createElement)(TitleToggle, { hidden: mode === "hidden", onToggle }),
-    shown === "hidden" ? null : (0, import_react36.createElement)(LeftColumn, { mode: shown, width: ourWidth, onGrip: startDrag, leaving }, content)
+    shown === "hidden" ? null : (0, import_react36.createElement)(LeftColumn, { mode: shown, width: ourWidth, onGrip: phone ? null : startDrag, onBackdrop: phone ? () => actions.setLeftDrawer?.(false) : null, leaving }, content)
   );
 }
 function UpdateButton({ useUpdate, actions }) {
@@ -30442,9 +30528,12 @@ function apply(ctx) {
       writeSidebar(sidebarSaved);
       sidebarPref.set(next);
     },
+    // On a phone the switch opens and closes the drawer and leaves the saved
+    // preference alone (see switchResult).
     toggleLeftHidden: () => {
-      ui2.set((state) => state.leftDrawer || state.panelYield ? { ...state, leftDrawer: false, panelYield: false } : state);
-      actions.setSidebarPref(toggledPref(sidebarPref.getSnapshot(), sidebarSaved.shown));
+      const next = switchResult({ viewport: frame.getSnapshot().viewport, pref: sidebarPref.getSnapshot(), shown: sidebarSaved.shown, drawer: ui2.getSnapshot().leftDrawer === true, panelYield: ui2.getSnapshot().panelYield === true });
+      ui2.set((state) => state.leftDrawer === next.drawer && state.panelYield === true === next.panelYield ? state : { ...state, leftDrawer: next.drawer, panelYield: next.panelYield });
+      if (next.pref !== sidebarPref.getSnapshot()) actions.setSidebarPref(next.pref);
     },
     setSidebarWidth: (width) => {
       sidebarSaved = { ...sidebarSaved, width };
@@ -30854,9 +30943,22 @@ function apply(ctx) {
   };
   const installFrameSync = () => {
     let lastDetails = ui2.getSnapshot().details;
+    let wasPhone = isPhone(frame.getSnapshot().viewport);
     const sync = () => {
       const s = ui2.getSnapshot();
       const f = frame.getSnapshot();
+      const phone = isPhone(f.viewport);
+      if (phone !== wasPhone) {
+        wasPhone = phone;
+        if (s.leftDrawer === true) {
+          actions.setLeftDrawer(false);
+          return;
+        }
+      }
+      if (phone && s.leftDrawer === true && (s.settings || s.palette || s.newChat)) {
+        actions.setLeftDrawer(false);
+        return;
+      }
       const opened = s.details !== null && lastDetails === null;
       lastDetails = s.details;
       const layout = frameLayout({ viewport: f.viewport, sidebarWidth: f.sidebarWidth, pref: sidebarPref.getSnapshot(), drawer: s.leftDrawer === true, panel: s.details === null ? null : { view: s.view, yielded: false } });

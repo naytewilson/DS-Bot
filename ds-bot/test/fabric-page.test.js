@@ -197,7 +197,7 @@ test('SIEVE shows what reached the model against what went in, today and over al
   assert.match(harness[1], /^claude 30 calls · 80% saved$/)
   const rows = withClass(sieve, 'bt-fab-row').map(textOf)
   assert.ok(rows.some(row => /^Last tool call 2 min ago$/.test(row)), rows.join('|'))
-  assert.ok(rows.some(row => /^http:\/\/127\.0\.0\.1:8899\/sieve\/stats Up 3d · 120 requests today Healthy$/.test(row)), rows.join('|'))
+  assert.ok(rows.some(row => /^Fabric ingress 127\.0\.0\.1:8899 · Up 3d · 120 requests today Healthy$/.test(row)), rows.join('|'))
 })
 
 test('SIEVE with no calls yet says so, and a partial log says the counts are partial', () => {
@@ -219,7 +219,7 @@ test('a section that failed stays on the page with the reason, and the rest stil
   assert.match(textOf(sectionOf(tree, 'ANVIL hub')), /Truth board Could not be read: Timed out after 10 s/)
   const sieve = textOf(sectionOf(tree, 'SIEVE'))
   assert.match(sieve, /Tool output Could not be read: could not be read/)
-  assert.match(sieve, /http:\/\/127\.0\.0\.1:8899\/sieve\/stats Unreachable Down/)
+  assert.match(sieve, /Fabric ingress 127\.0\.0\.1:8899 · Unreachable Down/)
   assert.match(textOf(sectionOf(tree, 'Hosts')), /node-02/)
   assert.match(textOf(withClass(tree, 'bt-fab-bar')), /Degraded The ANVIL hub could not be read · SIEVE could not be read/)
 })
@@ -338,4 +338,26 @@ test('the "Updated" clock stands still while the tab is hidden and catches up wh
   timers.at(-1).fn()
   await settle()
   assert.equal(sets.length, 2, 'and keeps ticking')
+})
+
+test('an ingress row shows a title for its role, with host:port small and never the stats path', () => {
+  const value = healthy()
+  value.sieve.ingress = [
+    { url: 'http://127.0.0.1:8898/sieve/stats', ok: true, uptimeMs: 3_600_000, requestsToday: 7 },
+    { url: 'http://10.0.0.5:9000/sieve/stats', ok: true },
+  ]
+  const sieve = sectionOf(view(value), 'SIEVE')
+  const rows = withClass(sieve, 'bt-fab-row').map(textOf)
+  assert.ok(rows.some(row => /^Optimizer ingress 127\.0\.0\.1:8898 · Up 1h · 7 requests today Healthy$/.test(row)), rows.join('|'))
+  assert.ok(rows.some(row => /^10\.0\.0\.5:9000 Healthy$/.test(row)), rows.join('|'))
+  assert.ok(!rows.some(row => row.includes('/sieve/stats')))
+  const mono = withClass(sieve, 'bt-fab-mono').map(textOf)
+  assert.ok(mono.includes('127.0.0.1:8898'))
+})
+
+test('a saturated host keeps the state but the headline stops saying normal and says why', () => {
+  const value = healthy()
+  value.host = { ...value.host, cpus: 16, load: [30, 28, 20], memory: { totalBytes: 100 * 1024 ** 3, availableBytes: 7 * 1024 ** 3 } }
+  const [bar] = withClass(view(value), 'bt-fab-bar')
+  assert.match(textOf(bar), /^All systems reachable node-02 is under heavy load · Memory is nearly full Updated/)
 })
