@@ -11,5 +11,6 @@ export async function resolve(specifier, context, nextResolve) {
   const resolved = await nextResolve(specifier, context)
   // The Host of the app is replaced, so that no DSH is booted.
   if (resolved.url.endsWith('/app/src/host-process.mjs')) return fake('fake-host-process.mjs')
+  if (resolved.url.endsWith('/app/src/edition.mjs')) return fake('fake-edition.mjs')
   return resolved
 }

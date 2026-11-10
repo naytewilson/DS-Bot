@@ -2,6 +2,8 @@
 // Copy is looked up at render time and every slot outlet re-renders on a language
 // switch, so nothing caches a translated string.
 
+import { BRAND, BRAND_SHORT, UPSTREAM } from '../shared/brand.js'
+
 export const NAMESPACE = 'ds-bot'
 
 const ZH = {
@@ -224,12 +226,12 @@ const ZH = {
   'Add a provider': '添加服务商',
   'Needs an API key': '需要 API key',
   'Key set': '已设置 key',
-  'Key set outside DS Bot': 'key 在 DS Bot 之外设置',
+  'Key set outside {brand}': 'key 在 {brand} 之外设置',
   'No models': '没有模型',
   '{count} models': '{count} 个模型',
   // What a Bot runs on
   'Runs on': '运行方式',
-  'DS Bot model': 'DS Bot 模型',
+  '{brand} model': '{brand} 模型',
   'Local agent': '本地 Agent',
   'CLI default': 'CLI 默认',
   'Signed in': '已登录',
@@ -237,7 +239,7 @@ const ZH = {
   'Sign-in unknown': '登录状态未知',
   'Looking for agent CLIs…': '正在查找 Agent CLI…',
   'Reading models…': '正在读取模型…',
-  "Answers with a model served by DS Bot, with DS Bot's tools.": '用 DS Bot 里的模型回答，用 DS Bot 的工具。',
+  "Answers with a model served by {brand}, with {brand}'s tools.": '用 {brand} 里的模型回答，用 {brand} 的工具。',
   'Answers through this CLI on your computer, with its own tools and sign-in.': '通过这台电脑上的 CLI 回答，用它自己的工具和登录。',
   'Change what {name} runs on?': '更换 {name} 的运行方式？',
   'Its own chat starts a new part with a handoff before the next turn.': '下一轮开始前，它的私聊会开新的一段并做好交接。',
@@ -271,7 +273,7 @@ const ZH = {
   'Current session': '当前会话',
   'This page could not be shown.': '这个页面无法显示。',
   'Current': '当前',
-  'This key comes from outside DS Bot, such as an environment variable, and cannot be changed here.': '这个 key 来自 DS Bot 之外（例如环境变量），这里改不了。',
+  'This key comes from outside {brand}, such as an environment variable, and cannot be changed here.': '这个 key 来自 {brand} 之外（例如环境变量），这里改不了。',
   'and {count} more': '还有 {count} 个',
   'Remove {name}? Bots on its models need another model.': '删除 {name}？用它的模型的 Bot 要换一个模型。',
   'Remove provider': '删除服务商',
@@ -338,7 +340,8 @@ const ZH = {
   'HTTP status': 'HTTP 状态码',
   'Request ID': '请求 ID',
   'Provider message': '原文',
-  'DS Bot': 'DS Bot',
+  '{brand}': '{brand}',
+  'Built on {upstream}': '基于 {upstream} 构建',
 
   // Header
   'Message {name}': '给 {name} 发消息',
@@ -440,7 +443,7 @@ const ZH = {
   Rename: '重命名',
   'Add instructions in Bot settings': '在 Bot 设置里添加说明',
   'No scheduled tasks yet. To add one, tell the Bot in its chat what to do and when.': '还没有定时任务。要添加，在对话里告诉 Bot 做什么、什么时候做。',
-  'The browser is in DSH Desktop and the DS Bot app.': '浏览器在 DSH 桌面版和 DS Bot 应用里。',
+  'The browser is in DSH Desktop and the {brand} app.': '浏览器在 DSH 桌面版和 {brand} 应用里。',
   'New tab': '新标签页',
   'Close tab': '关闭标签页',
   'Open {title}': '打开 {title}',
@@ -605,7 +608,7 @@ const ZH = {
   Graphite: '石墨', Rose: '玫瑰', Sky: '天蓝', Tangerine: '橘', Cobalt: '钴蓝',
 
   // Themes
-  DeepSeek: 'DeepSeek', Mono: '黑白', Paper: '纸张', Moonlight: '月光',
+  ANVIL: 'ANVIL', DeepSeek: 'DeepSeek', Mono: '黑白', Paper: '纸张', Moonlight: '月光',
 
   // Settings dialog
   General: '通用',
@@ -641,7 +644,7 @@ const ZH = {
   'No group chats yet.': '还没有群聊。',
   'A group chat lets several Bots work on one thing with you.': '在群聊里，几个 Bot 和你一起做一件事。',
   'Back to group chats': '返回群聊列表',
-  'DS Bot settings': 'DS Bot 设置',
+  '{brand} settings': '{brand} 设置',
   'Settings pages': '设置页面',
   'Advanced settings': '高级设置',
   'Back to models': '返回模型',
@@ -710,14 +713,14 @@ const ZH = {
   '{n} d': '{n} 天',
 
   // Plugin updates
-  'DS Bot {version} is available': 'DS Bot {version} 可以更新',
-  'Updating DS Bot…': '正在更新 DS Bot…',
-  'DS Bot {version} is installed. Restart DSH to use it.': 'DS Bot {version} 已安装，重启 DSH 后生效',
-  'DS Bot {version} is installed.': 'DS Bot {version} 已安装。',
-  'DS Bot update': 'DS Bot 更新',
-  'DS Bot {version}': 'DS Bot {version}',
+  '{brand} {version} is available': '{brand} {version} 可以更新',
+  'Updating {brand}…': '正在更新 {brand}…',
+  '{brand} {version} is installed. Restart DSH to use it.': '{brand} {version} 已安装，重启 DSH 后生效',
+  '{brand} {version} is installed.': '{brand} {version} 已安装。',
+  '{brand} update': '{brand} 更新',
+  '{brand} {version}': '{brand} {version}',
   'Update installed': '更新已安装',
-  'Restart DSH to start using DS Bot {version}.': '重启 DSH 后开始使用 DS Bot {version}。',
+  'Restart DSH to start using {brand} {version}.': '重启 DSH 后开始使用 {brand} {version}。',
   'You have {version}.': '当前版本 {version}。',
   'The update did not finish: {reason}': '更新没有完成：{reason}',
   "What's new": '更新说明',
@@ -727,7 +730,7 @@ const ZH = {
   'DSH update': 'DSH 更新',
   'DSH {version}': 'DSH {version}',
   'Restart DSH to start using DSH {version}.': '重启 DSH 后开始使用 DSH {version}。',
-  'Update DS Bot {version} first.': '先更新 DS Bot {version}。',
+  'Update {brand} {version} first.': '先更新 {brand} {version}。',
   'Open updates': '打开更新',
 
   // Command palette
@@ -1184,11 +1187,130 @@ const ZH = {
   'Compared with the {count} days before': '与再往前 {count} 天相比',
   '{share}% of all usage from {span}': '占 {span} 全部用量的 {share}%',
   // About
-  'About DS Bot': '关于 DS Bot',
+  'About {brand}': '关于 {brand}',
+  // Fabric
+  '{days}d {hours}h': '{days}天 {hours}小时',
+  '{days}d': '{days}天',
+  '{hours}h {minutes}m': '{hours}小时 {minutes}分',
+  '{hours}h': '{hours}小时',
+  '{minutes}m': '{minutes}分钟',
+  '{seconds}s': '{seconds}秒',
+  '{ms} ms': '{ms} 毫秒',
+  '{seconds} s': '{seconds} 秒',
+  '{count} s ago': '{count} 秒前',
+  '{count} min ago': '{count} 分钟前',
+  '{count} h ago': '{count} 小时前',
+  '{count} d ago': '{count} 天前',
+  'Running for {time}': '已运行 {time}',
+  'Not installed on this host': '此主机未安装',
+  'Not available on this platform': '此平台不支持',
+  'Not configured': '未配置',
+  'Unreachable': '无法连接',
+  'Cannot be run': '无法运行',
+  'Cannot be read': '无法读取',
+  'Unexpected output': '输出格式不符',
+  'Unreadable output': '输出无法解析',
+  'No details': '没有详情',
+  'Running': '运行中',
+  'Starting': '正在启动',
+  'Reloading': '正在重载',
+  'Stopping': '正在停止',
+  'The status could not be read': '无法读取状态',
+  '{unit} is {state}': '{unit}：{state}',
+  'The Fabric service': 'Fabric 服务',
+  'The Fabric service could not be checked': '无法检查 Fabric 服务',
+  'This host could not be read': '无法读取本机状态',
+  '{mount} is {percent} full': '{mount} 已用 {percent}',
+  '{name} is unreachable': '无法连接 {name}',
+  'The ANVIL hub could not be read': '无法读取 ANVIL hub',
+  'ANVIL OS could not be read': '无法读取 ANVIL OS',
+  '{count} ANVIL OS services have failed': '{count} 个 ANVIL OS 服务已失败',
+  'SIEVE could not be read': '无法读取 SIEVE',
+  'Nothing could be read': '什么都读不到',
+  'The last refresh failed': '上次刷新失败',
+  'All systems normal': '一切正常',
+  'Degraded': '部分异常',
+  'Down': '不可用',
+  'Turned off': '已关闭',
+  'Fabric: {state}': 'Fabric：{state}',
+  'Open blockers': '未解决阻塞',
+  'Active agents': '活跃 Agent',
+  'Tasks': '任务',
+  'Memories': '记忆',
+  'Events': '事件',
+  'Last write': '最近写入',
+  'Yes': '是',
+  'No': '否',
+  'Could not be read: {reason}': '无法读取：{reason}',
+  'This host': '本机',
+  'Up {time}': '已运行 {time}',
+  'Load': '负载',
+  '1, 5 and 15 minutes on {cores}': '1、5、15 分钟均值，{cores}',
+  '1 core': '1 核',
+  '{count} cores': '{count} 核',
+  'System memory': '系统内存',
+  'Free memory is not measured on macOS': 'macOS 上不统计可用内存',
+  '{free} available of {total}, by memory pressure': '{total} 中约 {free} 可用（按内存压力计算）',
+  'Unexpected snapshot format': '快照格式异常',
+  'The hub reported an error': '中枢报告了错误',
+  'Reports a problem': '报告了问题',
+  'Answer too large': '回应过大',
+  'Redirected, which is not followed': '被重定向（不会跟随）',
+  'An earlier check has not finished yet': '上一次检查尚未结束',
+  'Timed out after {seconds} s': '{seconds} 秒后超时',
+  'HTTP error {status}': 'HTTP 错误 {status}',
+  '{percent} used': '已用 {percent}',
+  '{free} free of {total}': '{total} 中可用 {free}',
+  'Disks could not be read: {reason}': '无法读取磁盘：{reason}',
+  'Reachable': '可连接',
+  'Not present': '未挂载',
+  'Hosts': '主机',
+  'Fabric service': 'Fabric 服务',
+  'ANVIL OS': 'ANVIL OS',
+  '{running} of {total} running': '{total} 个中 {running} 个在运行',
+  'ANVIL OS lists no services.': 'ANVIL OS 没有列出服务。',
+  'Services': '服务',
+  'ANVIL hub': 'ANVIL hub',
+  'Show fewer': '收起',
+  'Show all {count}': '显示全部 {count} 项',
+  'The hub reports no metrics.': 'hub 没有指标。',
+  '{out} reached the model, of {in}': '{in} 中有 {out} 到达模型',
+  'No tool calls yet': '还没有工具调用',
+  'saved': '已节省',
+  '{count} calls': '{count} 次调用',
+  '{percent} saved': '节省 {percent}',
+  '{count} requests today': '今天 {count} 次请求',
+  'Healthy': '正常',
+  'Tool output': '工具输出',
+  'All time': '全部时间',
+  'And {count} more': '另有 {count} 项',
+  'Last tool call {time}': '最近一次工具调用：{time}',
+  'Counts cover the recent part of the log only.': '统计只覆盖日志的最近部分。',
+  'Refreshing…': '正在刷新…',
+  'Reading the fabric…': '正在读取 Fabric…',
+  'Fabric is not configured': 'Fabric 尚未配置',
+  "This host has the Fabric view turned off. Turn it on in the plugin's configuration to see this machine, its peers, the ANVIL hub and SIEVE here.": '此主机关闭了 Fabric 视图。在插件配置中打开后，就能在这里看到本机、对端机器、ANVIL hub 和 SIEVE。',
+  'Fabric': 'Fabric',
+  'Unknown state': '未知状态',
+  'Saved': '已节省',
+  'Truth board': '状态看板',
+  'Checking the fabric': '正在检查 fabric',
+  'Searching ANVIL findings': '正在搜索 ANVIL 记录',
+  'Reading the ANVIL log': '正在读取 ANVIL 日志',
+  'Recording a decision': '正在记录决定',
+  'From configuration': '来自配置',
+  "Added by this host's configuration; saving a change makes it yours.": '由本机配置添加；保存修改后就归你自己管理。',
+  'ANVIL edition': 'ANVIL 版',
+  '{edition} edition': '{edition} 版',
+  'Managed by your fabric.': '由你的 fabric 管理。',
+  'Built on {upstream} {version}': '基于 {upstream} {version}',
+  'Upstream release notes': '上游发布说明',
+  'The Fabric status could not be read': '无法读取 Fabric 状态',
+  'Checked in {time}. This page reads again every 30 seconds while it is open.': '用时 {time}。页面打开期间每 30 秒重新读取一次。',
   'Version {version}': '版本 {version}',
-  'Star DS Bot on GitHub': '在 GitHub 上给 DS Bot 点 Star',
+  'Star {upstream} on GitHub': '在 GitHub 上给 {upstream} 点 Star',
   '{count} stars': '{count} 个 Star',
-  'If DS Bot helps you, a star on GitHub helps more people find it.': '如果 DS Bot 对你有用，欢迎在 GitHub 上点个 Star，让更多人看到它。',
+  'If {upstream} helps you, a star on GitHub helps more people find it.': '如果 {upstream} 对你有用，欢迎在 GitHub 上点个 Star，让更多人看到它。',
   Updates: '更新',
   'Check for updates': '检查更新',
   'Checking…': '正在检查…',
@@ -1203,7 +1325,7 @@ const ZH = {
   '{version} is available': '{version} 已发布',
   'Installed from a local folder; update it there.': '从本地文件夹安装，请在那里更新。',
   'Updates are not offered for this install.': '这种安装方式不提供更新。',
-  'Updates come with the DS Bot app.': '随 DS Bot 应用一起更新。',
+  'Updates come with the {brand} app.': '随 {brand} 应用一起更新。',
   Links: '链接',
   'Source code': '源代码',
   'Release notes': '发布说明',
@@ -1219,7 +1341,7 @@ const ZH = {
   Show: '查看',
   Hide: '收起',
   'GitHub issue': 'GitHub issue',
-  'Opens a new issue in the DS Bot repository with all of this filled in. Nothing is sent until you submit it there.': '在 DS Bot 仓库新建一个 issue，并填好以上内容。你在 GitHub 上提交之前，什么都不会发出。',
+  'Opens a new issue in the {upstream} repository with all of this filled in. Nothing is sent until you submit it there.': '在 {upstream} 仓库新建一个 issue，并填好以上内容。你在 GitHub 上提交之前，什么都不会发出。',
   'Report on GitHub': '在 GitHub 上报告',
   'Copied the diagnostics.': '已复制诊断信息。',
   'Could not copy. Select the text below and copy it.': '无法复制。请选中下面的文字手动复制。',
@@ -1231,7 +1353,7 @@ const ZH = {
   'Recent errors': '最近的错误',
   'Recent errors · {count}': '最近的错误 · {count}',
   'No errors recorded.': '没有错误记录。',
-  'Failed model calls and DS Bot problems show here, newest first.': '模型调用失败和 DS Bot 的问题会显示在这里，最新的在前。',
+  'Failed model calls and {brand} problems show here, newest first.': '模型调用失败和 {brand} 的问题会显示在这里，最新的在前。',
   'Model call': '模型调用',
   'This window': '这个窗口',
   'Error log': '错误日志',
@@ -1498,7 +1620,8 @@ const ZH = {
 const HOST_ERRORS = [
   [/^Could not reach the mail server at (.+)\. Check the server address\.$/, '连不上邮件服务器 $1，请检查服务器地址。'],
   [/^Model (.+) is not available\. Available: (.*)$/, '模型 $1 不可用。可用的：$2'],
-  [/^The API key for (.+) is set outside DS Bot and cannot be changed here$/, '$1 的 API key 是在 DS Bot 之外设置的，这里改不了'],
+  // The host now says this edition's name; a saved or older message may still say the upstream's.
+  [new RegExp(`^The API key for (.+) is set outside (?:${BRAND}|${UPSTREAM}) and cannot be changed here$`), `$1 的 API key 是在 ${BRAND} 之外设置的，这里改不了`],
   [/^(.+) takes no API key here$/, '$1 不能在这里填 API key'],
   [/^(.+) is already set up$/, '$1 已经设置过了'],
   [/^DSH offers no provider (.+)$/, 'DSH 没有服务商 $1'],
@@ -1555,7 +1678,7 @@ const HOST_ERRORS = [
 const HOST_ZH = {
   'Request failed': '请求失败',
   'Permissions are not available in this DeepSeek Harness': '这个 DeepSeek Harness 不支持权限设置',
-  'Avatar images must be PNG, JPEG, WebP, or GIF': '头像图片必须是 PNG、JPEG、WebP 或 GIF',
+  'Avatar images must be PNG, JPEG, WebP, GIF, or SVG': '头像图片必须是 PNG、JPEG、WebP、GIF 或 SVG',
   'Avatar image is too large': '头像图片太大了',
   'A Bot needs a name': 'Bot 需要一个名字',
   'A Bot name cannot contain @, ` or a line break': 'Bot 名字里不能有 @、` 或换行',
@@ -1594,14 +1717,16 @@ const HOST_ZH = {
   'This side chat is no longer here.': '这个侧边对话已经不在了。',
   'This side question is no longer here.': '这个侧边提问已经不在了。',
   'This Bot has not called a model yet. Send a normal message first.': '这个 Bot 还没有调用过模型，请先正常发一条消息。',
-  'DS Bot restarted before this answer finished.': 'DS Bot 在回答完成前重启了。',
+  // Saved asides keep the message they were saved with, so both spellings are kept.
+  [`${BRAND} restarted before this answer finished.`]: `${BRAND} 在回答完成前重启了。`,
+  [`${UPSTREAM} restarted before this answer finished.`]: `${BRAND} 在回答完成前重启了。`,
   'The model called a tool again after being told not to, so this aside was not answered.': '模型在被要求不要调用工具之后又调用了工具，所以这次没有回答。',
   'The model wrote nothing.': '模型没有写任何内容。',
   'Nothing to ask': '没有要问的内容',
   'Nothing to open': '没有要打开的内容',
   'Nothing to cancel': '没有要取消的内容',
   'Nothing to close': '没有要关闭的内容',
-  'DS Bot is still loading this chat.': 'DS Bot 还在加载这个对话。',
+  '{brand} is still loading this chat.': '{brand} 还在加载这个对话。',
   // Computer use
   'Computer use': '电脑操控',
   'Computer': '电脑',
@@ -1671,18 +1796,28 @@ export function installLocale(locale) {
   }
 }
 
+// The product name is a parameter of every string, so copy says {brand} and the name lives
+// in src/shared/brand.js alone.
+const BASE = Object.freeze({ brand: BRAND, brandShort: BRAND_SHORT, upstream: UPSTREAM })
+const withBrand = params => (params ? { ...BASE, ...params } : BASE)
 export function t(key, params) {
-  return bound ? bound(key, params) : fill(key, params)
+  const all = withBrand(params)
+  return bound ? bound(key, all) : fill(key, all)
 }
+
+// Host messages are written for the upstream plugin; the interface shows them under
+// this edition's name.
+const UPSTREAM_NAME = new RegExp(`\\b${UPSTREAM}\\b`, 'g')
+export const brandText = text => (typeof text === 'string' ? text.replace(UPSTREAM_NAME, BRAND) : text)
 
 // A message from the host, in the interface language.
 export function hostText(message) {
-  if (!language().startsWith('zh')) return message
+  if (!language().startsWith('zh')) return brandText(message)
   if (Object.hasOwn(ZH, message)) return t(message)
   for (const [pattern, template] of HOST_ERRORS) {
     if (pattern.test(message)) return message.replace(pattern, template)
   }
-  return message
+  return brandText(message)
 }
 
 // The active DSH language tag, for dates and times.

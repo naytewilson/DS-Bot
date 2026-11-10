@@ -11,7 +11,7 @@ afterEach(() => { globalThis.fetch = realFetch })
 
 // The dsh-update module alone: a stub loader says the running DSH version, a
 // stub plugin manager says how the bot was installed, and fetch is scripted.
-function start({ current = '0.1.0', source, answers = {}, app = false, spawn, config = {}, profileDir }) {
+function start({ current = '0.1.0', source, answers = {}, app = false, spawn, config = {}, profileDir, edition = null }) {
   const fetched = []
   const spawns = []
   const warnings = []
@@ -37,7 +37,7 @@ function start({ current = '0.1.0', source, answers = {}, app = false, spawn, co
     warn: (...args) => warnings.push(args),
     dshSpawn: spawn ?? ((command, argv) => { spawns.push([command, argv]); return fakeChild(0) }),
   }
-  install(rt)
+  install(rt, { edition })
   return { rt, fetched, spawns, warnings }
 }
 
@@ -153,4 +153,16 @@ test('a failed npm install reports why and can be tried again', async () => {
   rt.dshUpdateStart()
   await flush()
   assert.equal((await rt.dshUpdateCheck()).phase, 'installed')
+})
+
+test('an edition never asks the upstream release which DSH to move to', async () => {
+  const source = `github:naytewilson/DS-Bot#anvil/edition&path:/ds-bot`
+  for (const answers of [registryLatest({ verifiedDsh: '9.9.9' }), githubLatest('v9.0.0', { dsBot: { verifiedDsh: '9.9.9' } })]) {
+    const { rt, fetched, spawns } = start({ source, answers, edition: 'anvil' })
+    const view = await rt.dshUpdateCheck()
+    assert.deepEqual(fetched, [])
+    assert.equal(view.verified, null)
+    assert.equal(view.available, false)
+    assert.deepEqual(spawns, [])
+  }
 })

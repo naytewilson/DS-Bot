@@ -5,6 +5,7 @@ import { mkdir } from 'node:fs/promises'
 import { MAX_AVATAR_IMAGE, ROOM_MAX_MEMBERS, ROOM_MODES, ROOM_NAME_MAX, ROOM_NOTICE_MAX, SECTION_COLORS, SECTION_NAME_MAX } from './constants.js'
 import { currentColor, isColor, normalize, unquote } from './text.js'
 import { nameProblem } from '../shared/mentions.js'
+import { BRAND } from '../shared/brand.js'
 
 const BROWSER_GRANT_KINDS = new Set(['post', 'upload', 'download', 'delete', '*'])
 const HOSTNAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/
@@ -64,7 +65,7 @@ export function install(rt) {
     }
     const path = rt.defaultTeamFolder()
     await mkdir(path, { recursive: true })
-    const workspace = await ctx.workspaceRegistry.resolveByPath(path) ?? await ctx.workspaceRegistry.create(path, 'DS Bot')
+    const workspace = await ctx.workspaceRegistry.resolveByPath(path) ?? await ctx.workspaceRegistry.create(path, BRAND)
     state.workspaceId = workspace.id
     await rt.save()
     return workspace.id
@@ -933,9 +934,10 @@ export function install(rt) {
     await rt.load()
     void rt.syncModels()
     if (state.mainBotIds.some(id => rt.botOf(id))) return
-    // Only the team's first Main Bot is stored as the DeepSeek whale; other Bots get a
-    // look from their id, and a Bot made Main Bot later keeps its own.
-    bootstrapping ??= createBot({ name: defaults.mainName, role: defaults.mainRole, main: true, color: 'deepseek', avatar: { shape: 'whale' }, pickModel: true })
+    // Only the team's first Main Bot is stored as the orange anvil (the whale it replaced
+    // stays in the picker); other Bots get a look from their id, and a Bot made Main Bot
+    // later keeps its own.
+    bootstrapping ??= createBot({ name: defaults.mainName, role: defaults.mainRole, main: true, color: 'orange', avatar: { shape: 'anvil' }, pickModel: true })
       .finally(() => { bootstrapping = null })
     await bootstrapping
   }

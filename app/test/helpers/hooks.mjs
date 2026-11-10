@@ -17,5 +17,7 @@ export function resolve(specifier, context, nextResolve) {
   const resolved = nextResolve(specifier, context)
   // The Host of the app is replaced, so that no DSH is booted.
   if (resolved.url.endsWith('/app/src/host-process.mjs')) return fake('fake-host-process.mjs')
+  // The app runs as the upstream release here; a test that wants an edition sets its state.
+  if (resolved.url.endsWith('/app/src/edition.mjs')) return fake('fake-edition.mjs')
   return resolved
 }

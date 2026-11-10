@@ -49,3 +49,13 @@ test('copy follows the DSH language and stays English without a locale service',
   assert.equal(t('Model'), 'Model')
   assert.equal(hostText('A Bot named Writer already exists'), 'A Bot named Writer already exists')
 })
+
+// hostText looks a host message up by its exact text: a key that drifted from the host's wording
+// is dead, and the English message shows in the Chinese interface.
+test('the avatar format error the host throws is translated word for word, SVG included', () => {
+  const host = readFileSync(new URL('../src/host/roster.js', import.meta.url), 'utf8')
+  const message = /new Error\('(Avatar images must be [^']+)'\)/.exec(host)?.[1]
+  assert.equal(message, 'Avatar images must be PNG, JPEG, WebP, GIF, or SVG')
+  assert.equal(DICTIONARY.zh[message], '头像图片必须是 PNG、JPEG、WebP、GIF 或 SVG')
+  assert.equal(Object.hasOwn(DICTIONARY.zh, 'Avatar images must be PNG, JPEG, WebP, or GIF'), false, 'the old wording is gone')
+})

@@ -886,6 +886,11 @@ function toolActivity(name, arg, findBot, self) {
       return { label: t('Updating {name}', { name: target?.name ?? t('a Bot') }), state: 'sending' }
     }
     case 'list_bots': return { label: t('Checking the team'), state: 'searching' }
+    // The ANVIL fabric tools (src/host/fabric.js).
+    case 'fabric_status': return { label: t('Checking the fabric'), state: 'searching' }
+    case 'anvil_findings': return { label: t('Searching ANVIL findings'), state: 'searching' }
+    case 'anvil_log': return { label: t('Reading the ANVIL log'), state: 'searching' }
+    case 'anvil_decision': return { label: t('Recording a decision'), state: 'working' }
     case 'read_group_chat': return { label: t('Reading {name}', { name: arg('group') ?? t('a group chat') }), state: 'searching' }
     case 'read_own_chat': return { label: t('Looking back through the chat'), state: 'searching' }
     case 'remember': return { label: t('Saving to memory'), state: 'working' }

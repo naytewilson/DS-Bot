@@ -9,6 +9,7 @@ import { replaceFile } from '../files.js'
 import { viewCardText } from '../parts.js'
 import { imPlatform, IM_PLATFORMS } from '../../shared/im-platforms.js'
 import { adapters } from './platforms/index.js'
+import { BRAND } from '../../shared/brand.js'
 
 const RECONCILE_MS = 15_000
 const RUNTIME_SAVE_MS = 400
@@ -24,9 +25,9 @@ export function install(rt) {
   const zh = () => String(rt.uiLanguage?.() ?? '').startsWith('Chinese')
   const text = (key, values = {}) => {
     const line = {
-      requested: zh() ? '已向 DS Bot 发出连接请求，请在电脑上的 DS Bot 设置 → IM 里允许。' : 'A connection request was sent to DS Bot; allow it in Settings → IM on the computer.',
-      unbound: zh() ? '这个 IM 机器人还没绑定 Bot，请在 DS Bot 设置 → IM 里选一个。' : 'This IM bot is not bound to a Bot yet; pick one in DS Bot Settings → IM.',
-      unboundGroup: zh() ? '这个群还没绑定，请在 DS Bot 设置 → IM 里给它选一个群或 Bot。' : 'This group is not bound yet; pick a group or a Bot for it in DS Bot Settings → IM.',
+      requested: zh() ? `已向 ${BRAND} 发出连接请求，请在电脑上的 ${BRAND} 设置 → IM 里允许。` : `A connection request was sent to ${BRAND}; allow it in Settings → IM on the computer.`,
+      unbound: zh() ? `这个 IM 机器人还没绑定 Bot，请在 ${BRAND} 设置 → IM 里选一个。` : `This IM bot is not bound to a Bot yet; pick one in ${BRAND} Settings → IM.`,
+      unboundGroup: zh() ? `这个群还没绑定，请在 ${BRAND} 设置 → IM 里给它选一个群或 Bot。` : `This group is not bound yet; pick a group or a Bot for it in ${BRAND} Settings → IM.`,
       connected: zh() ? `已连接，现在可以和 ${values.target} 说话了。` : `Connected — you can talk to ${values.target} now.`,
       stopped: zh() ? '已停下。' : 'Stopped.',
       idle: zh() ? '现在没有在做的活。' : 'Nothing is running.',

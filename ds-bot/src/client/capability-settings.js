@@ -90,7 +90,7 @@ function CapabilityForm({ draft, setDraft, items, actions, onClose }) {
       h('button', { type: 'submit', className: 'bt-send bt-soft-sm' }, draft.originalName ? t('Save changes') : t('Add capability'))))
 }
 
-function CapabilityRow({ item, onEdit, onDelete, onApprove, confirming }) {
+export function CapabilityRow({ item, onEdit, onDelete, onApprove, confirming }) {
   const detail = item.kind === 'pack' ? `${t('Pack')}: ${(item.items ?? []).join(', ') || t('No items')}`
     : item.kind === 'mcp' ? item.transport === 'stdio' ? t('Local command') : t('HTTP server')
       : t('Skill')
@@ -100,7 +100,9 @@ function CapabilityRow({ item, onEdit, onDelete, onApprove, confirming }) {
   return h('div', { className: 'bt-connector' },
     h('div', { className: 'bt-connector-head' },
       h('span', { className: 'bt-connector-text' },
-        h('span', { className: 'bt-connector-name' }, item.name),
+        h('span', { className: 'bt-connector-name' }, item.name,
+          // Seeded from this host's configuration (`capabilities`), until someone saves a change to it.
+          item.source === 'config' ? h('span', { className: 'bt-tag bt-config-tag', title: t("Added by this host's configuration; saving a change makes it yours.") }, t('From configuration')) : null),
         h('span', { className: 'bt-connector-status' }, secondary)),
       h('span', { className: 'bt-connector-actions' },
         item.kind === 'mcp' && item.transport === 'stdio' && !item.approved

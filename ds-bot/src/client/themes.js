@@ -7,7 +7,15 @@ import { createSource } from './sources.js'
 // tokens derive from them, so a registered theme recolors the whole team UI.
 
 const THEME_KEYS = ['bg', 'sidebar', 'bubble', 'card', 'text', 'user', 'userText', 'accent']
+// The team's theme before it picks one: the ANVIL edition's own. Cold steel surfaces, one
+// ember accent, warm off-white ink.
+export const DEFAULT_THEME = 'anvil'
 const THEMES = {
+  anvil: {
+    label: 'ANVIL',
+    light: { bg: '#faf8f5', sidebar: '#f1eee9', bubble: '#e8e4dd', card: '#ffffff', text: '#17191c', user: '#1b1e22', userText: '#faf8f5', accent: '#c24607' },
+    dark: { bg: '#0e1012', sidebar: '#13161a', bubble: '#1f242a', card: '#181c21', text: '#ece8e1', user: '#f0ebe3', userText: '#14110d', accent: '#ff7a1a' },
+  },
   deepseek: {
     label: 'DeepSeek',
     light: { bg: '#fcfcfc', sidebar: '#f7f7f7', bubble: '#eeeeee', card: '#ffffff', text: '#141414', user: '#070707', userText: '#fcfcfc', accent: '#4d6bfe' },
@@ -58,7 +66,14 @@ const darkAccent = (accent) => {
 export const themeCss = (theme, accent) => `html body{${declarations(themeVars(theme.light, false, accent ?? theme.light.accent))}}
 html body[data-ds-dark-theme]{${declarations(themeVars(theme.dark, true, darkAccent(accent) ?? theme.dark.accent))}}
 ${theme.css ?? ''}`
-export const shellTokens = ({ light, dark }) => ({
+// The shell's own scrollbars and focus ring take the theme's text color and accent, so they
+// match the plugin's. `accent` is the user's pick, when there is one.
+export const shellTokens = ({ light, dark }, accent) => ({
+  '--dsw-alias-scrollbar-bg-l1': { light: rgba(light.text, 0.16), dark: rgba(dark.text, 0.16) },
+  '--dsw-alias-scrollbar-bg-l2': { light: rgba(light.text, 0.2), dark: rgba(dark.text, 0.2) },
+  '--dsw-alias-scrollbar-hover-l1': { light: rgba(light.text, 0.32), dark: rgba(dark.text, 0.32) },
+  '--dsw-alias-scrollbar-hover-l2': { light: rgba(light.text, 0.36), dark: rgba(dark.text, 0.36) },
+  '--dsw-focus-ring-color': { light: accent ?? light.accent, dark: darkAccent(accent) ?? dark.accent },
   '--dsw-alias-bg-base': { light: light.bg, dark: dark.bg },
   '--dsw-specific-sidebar-fill': { light: light.sidebar, dark: dark.sidebar },
   '--dsw-specific-input-major': { light: light.bg, dark: dark.sidebar },

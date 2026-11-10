@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import { Config as PiAiConfig } from '@deepseek-ai/dsh-llm-pi-ai'
 import { install as installModels } from '../src/host/models.js'
 import { checkKey, install, keyRefFor } from '../src/host/providers.js'
+import { BRAND } from '../src/shared/brand.js'
 
 // A DSH with the official DeepSeek route, an account route, and the pi-ai adapter: its
 // directory offers catalog providers, and its settings take path writes the way DSH's
@@ -116,8 +117,8 @@ test('a saved API key goes to the provider\'s reference and frees its models', a
 
 test('a key set outside DS Bot is not overwritten or removed', async () => {
   const { rt, writes } = dsh({ keys: { DEEPSEEK_API_KEY: 'k' }, readOnly: ['DEEPSEEK_API_KEY'] })
-  await assert.rejects(rt.setProviderKey('deepseek-official', 'sk-test'), /set outside DS Bot/)
-  await assert.rejects(rt.clearProviderKey('deepseek-official'), /set outside DS Bot/)
+  await assert.rejects(rt.setProviderKey('deepseek-official', 'sk-test'), new RegExp(`set outside ${BRAND}`))
+  await assert.rejects(rt.clearProviderKey('deepseek-official'), new RegExp(`set outside ${BRAND}`))
   assert.deepEqual(writes, [])
   assert.deepEqual(row(await rt.providersView(), 'deepseek-official').key, { configured: true, writable: false })
 })

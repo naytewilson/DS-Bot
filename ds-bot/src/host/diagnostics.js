@@ -10,6 +10,7 @@ import { arch, homedir, platform, release } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { format } from 'node:util'
+import { BRAND } from '../shared/brand.js'
 
 export const KEEP = 200
 const LOG_MAX_BYTES = 1 << 20
@@ -36,7 +37,9 @@ const CREDENTIALS = [
   [/(["']?(?:api[_-]?key|authorization|x-api-key|password|secret)["']?\s*[:=]\s*["']?)[^\s"',}]{6,}/gi, '$1[hidden]'],
 ]
 
-export function cleanText(text, { redact = value => value, home = homedir() } = {}) {
+// `max` bounds the result (2000 characters by default); a caller that bounds the text itself
+// passes Infinity.
+export function cleanText(text, { redact = value => value, home = homedir(), max = TEXT_MAX } = {}) {
   let out = redact(String(text ?? ''))
   for (const [pattern, replacement] of CREDENTIALS) out = out.replace(pattern, replacement)
   if (home && home.length > 1) {
@@ -47,7 +50,7 @@ export function cleanText(text, { redact = value => value, home = homedir() } = 
     const doubled = home.replace(/\\/g, '\\\\')
     if (doubled !== home) out = out.replace(new RegExp(quote(doubled), 'g'), '~')
   }
-  return out.length > TEXT_MAX ? `${out.slice(0, TEXT_MAX)}…` : out
+  return out.length > max ? `${out.slice(0, max)}…` : out
 }
 
 const errorText = error => `${error.name && error.name !== 'Error' ? `${error.name}: ` : ''}${error.message}`
@@ -66,7 +69,7 @@ export function reportMarkdown({ facts, client = {}, entries = [], clientEntries
   const lines = [
     '| | |',
     '|---|---|',
-    row('DS Bot', facts.botVersion),
+    row(BRAND, facts.botVersion),
     row('DSH', facts.dshVersion),
     row('Surface', client.surface),
     row('OS', facts.os),

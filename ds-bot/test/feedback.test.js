@@ -12,7 +12,7 @@ const bundle = await build({
 const ISSUES = 'https://github.com/Fei2411/DS-Bot/issues/new'
 
 // Settings → Feedback in a window whose `open` is `open`, with every state change kept.
-function page(window) {
+function page(window, { globals = {}, actions: more = {} } = {}) {
   const notes = []
   const react = {
   createContext: (initial) => { const ctx = { value: initial }; ctx.Provider = ({ value, children }) => { ctx.value = value; return children }; return ctx },
@@ -30,7 +30,7 @@ function page(window) {
   }
   const module = { exports: {} }
   runInNewContext(bundle.outputFiles[0].text, {
-    module, exports: module.exports, window, URL, URLSearchParams, setTimeout, clearTimeout,
+    module, exports: module.exports, window, URL, URLSearchParams, setTimeout, clearTimeout, ...globals,
     navigator: { clipboard: { writeText: () => Promise.resolve() } },
     require: (name) => {
       if (name === 'react') return react
@@ -38,13 +38,16 @@ function page(window) {
       throw new Error(`no platform module ${name}`)
     },
   })
-  const actions = { diagnostics: async () => ({ markdown: '| DS Bot | 0.1.6 |', issuesUrl: ISSUES, entries: [], total: 0 }) }
+  const actions = { diagnostics: async () => ({ markdown: '| DS Bot | 0.1.6 |', issuesUrl: ISSUES, entries: [], total: 0 }), ...more }
   let pending
   const run = (promise) => { pending = promise; return promise }
   const tree = module.exports.FeedbackPage({ actions, run, Section: 'section', Row: 'row' })
   const find = node => (Array.isArray(node) ? node.flatMap(find) : node && typeof node === 'object' ? [...(node.props?.className === 'bt-fb-primary' ? [node] : []), ...find(node.children)] : [])
   return {
     notes,
+    exports: module.exports,
+    tree,
+    settled: () => pending,
     report: async () => {
       find(tree)[0].props.onClick()
       await pending
@@ -81,4 +84,23 @@ test('in a browser that blocks the window, the page offers the link instead', as
   await report()
   assert.ok(notes.includes('The browser blocked the new window.'))
   assert.ok(notes.some(note => note.startsWith(`${ISSUES}?template=bug.yml`)))
+})
+
+test('the saved error log is named for the edition, not the upstream product', async () => {
+  const anchors = []
+  const document = { createElement: () => { const anchor = { click() { this.clicked = true } }; anchors.push(anchor); return anchor } }
+  const { exports, tree, settled } = page({}, { globals: { document, Blob }, actions: { diagnosticsLog: async () => 'the log' } })
+  assert.equal(exports.diagnosticsFileName(), 'anvil-crew-diagnostics.log')
+  assert.equal(exports.diagnosticsFileName('DS Bot'), 'ds-bot-diagnostics.log')
+  assert.equal(exports.diagnosticsFileName('  '), 'bot-diagnostics.log')
+
+  const buttons = []
+  const walk = (node) => { if (Array.isArray(node)) node.forEach(walk); else if (node && typeof node === 'object') { if (node.type === 'button') buttons.push(node); walk(node.children) } }
+  walk(tree)
+  const download = buttons.find(button => button.children.includes('Download'))
+  download.props.onClick()
+  await settled()
+  assert.equal(anchors.length, 1)
+  assert.equal(anchors[0].download, 'anvil-crew-diagnostics.log')
+  assert.equal(anchors[0].clicked, true)
 })

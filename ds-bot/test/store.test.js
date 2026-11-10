@@ -6,6 +6,7 @@ import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { install } from '../src/host/store.js'
+import { BRAND } from '../src/shared/brand.js'
 
 function patch(method, replace) {
   const original = fsp[method]
@@ -139,7 +140,7 @@ test('a state from a newer version remains untouched', async (t) => {
   const original = JSON.stringify({ version: 999, revision: 77, recoveryMarker: 'keep' })
   const { rt, statePath } = runtime(t, original)
   await rt.load()
-  assert.match(rt.readOnly(), /saved by a newer DS Bot; update DS Bot/)
+  assert.match(rt.readOnly(), new RegExp(`saved by a newer ${BRAND}; update ${BRAND}`))
   rt.state.prefs.marker = 'not saved'
   await rt.save()
   assert.equal(fs.readFileSync(statePath, 'utf8'), original)
@@ -329,7 +330,7 @@ test('a save writes nothing after adopting a file from a newer DS Bot', async (t
   fs.rmSync(join(home, 'state.lock'))
   rt.state.prefs.after = 'not saved'
   await rt.save()
-  assert.match(rt.readOnly(), /saved by a newer DS Bot/)
+  assert.match(rt.readOnly(), new RegExp(`saved by a newer ${BRAND}`))
   assert.equal(fs.readFileSync(statePath, 'utf8'), future)
   // The outside edit was still kept aside before it was adopted.
   const backups = fs.readdirSync(home).filter(name => name.startsWith('state.json.replaced-'))

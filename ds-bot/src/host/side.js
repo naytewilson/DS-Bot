@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { ASIDE_LIMIT } from './constants.js'
 import { EMPTY_ERROR, RESTART_ERROR, TOOL_ERROR, callAside, locatePrivate, snapshotOf } from './btw.js'
 import { replaceFile } from './files.js'
+import { BRAND } from '../shared/brand.js'
 
 // The mock model recognizes a side question by this first line.
 export const SIDE_MARKER = 'ds-bot/side'
@@ -185,7 +186,7 @@ export function install(rt) {
   }
 
   const abandoned = botId => disposing || dropped.has(botId) || rt.botOf(botId) === undefined
-  const stopError = (botId) => new Error(disposing && !dropped.has(botId) && rt.botOf(botId) !== undefined ? 'DS Bot is stopping.' : 'Unknown Bot')
+  const stopError = (botId) => new Error(disposing && !dropped.has(botId) && rt.botOf(botId) !== undefined ? `${BRAND} is stopping.` : 'Unknown Bot')
 
   // Wait until every targeted flight has left. A call still inside resolveAgent
   // has no `done` yet; yielding lets it notice disposal and drop the slot.

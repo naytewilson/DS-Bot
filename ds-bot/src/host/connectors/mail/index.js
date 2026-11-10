@@ -10,6 +10,7 @@ import { PRESETS, presetOf, mailSecretName } from './presets.js'
 import { connectImap, connectGmail } from './transport.js'
 import { output } from '../../tools.js'
 import { refreshTokens, invalidGrant, discover, beginBrowser, exchange } from '../oauth.js'
+import { BRAND } from '../../../shared/brand.js'
 
 const GOOGLE_SCOPES = 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify'
 const MAX_REQUESTS = 20
@@ -518,7 +519,7 @@ export function install(rt, host) {
       if (url.pathname !== '/callback') { res.writeHead(404); res.end(); return }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       if (!url.searchParams.get('code')) {
-        res.end('<p style="font-family:sans-serif">Google sign-in did not finish — go back to DS Bot and try again.</p>')
+        res.end(`<p style="font-family:sans-serif">Google sign-in did not finish — go back to ${BRAND} and try again.</p>`)
         rt.warn('ds-bot: mail Google sign-in failed: %s', url.searchParams.get('error') ?? 'no code')
         return
       }

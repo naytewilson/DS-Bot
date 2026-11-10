@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import { build } from 'esbuild'
+import { BRAND } from '../src/shared/brand.js'
 
 // jsdom comes from the harness that test/harness-resolve.mjs found, like the dsh packages.
 const PLUGIN = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -85,9 +86,9 @@ const MODELS = [
   { ref: 'local-codex-cli/default', provider: 'local-codex-cli', id: 'default', name: 'CLI default', providerName: 'Codex CLI' },
 ]
 
-test('the form opens on DS Bot models and can create at once', () => {
+test('the form opens on the product\'s own models and can create at once', () => {
   render({ models: MODELS })
-  assert.equal(button('DS Bot model').props['aria-pressed'], true)
+  assert.equal(button(`${BRAND} model`).props['aria-pressed'], true)
   assert.equal(button('Local agent').props['aria-pressed'], false)
   assert.equal(button('Create').props.disabled, false)
 })
@@ -107,6 +108,6 @@ test('on Local agent, Create waits for a CLI', () => {
   assert.equal(button('Local agent').props['aria-pressed'], true)
   assert.match(flatten(concrete).join(' '), /Looking for agent CLIs/)
   assert.equal(button('Create').props.disabled, true)
-  button('DS Bot model').props.onClick()
+  button(`${BRAND} model`).props.onClick()
   assert.equal(button('Create').props.disabled, false)
 })

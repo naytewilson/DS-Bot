@@ -3,19 +3,21 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
-import { cleanVersion, install, newer, sourceOf } from '../src/host/update.js'
+import { cleanVersion, editionOf, install, newer, sourceOf } from '../src/host/update.js'
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const flush = async () => { for (let index = 0; index < 14; index += 1) await Promise.resolve() }
 const realFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = realFetch })
 
-// The update module alone, on a stub plugin manager and a scripted fetch.
-function start({ source, registries, answers = {}, result = { application: 'restart-required' }, remove = { application: 'applied' }, config = {}, profileDir, home }) {
+// The update module alone, on a stub plugin manager and a scripted fetch. The tests below run
+// the upstream release's behaviour (`edition: null`); the ANVIL edition's own is at the end.
+function start({ source, registries, answers = {}, result = { application: 'restart-required' }, remove = { application: 'applied' }, config = {}, profileDir, home, edition = null }) {
   const fetched = []
   const installs = []
   const removes = []
   const warnings = []
+  const effects = []
   globalThis.fetch = async (url) => {
     fetched.push(url)
     const answer = answers[url]
@@ -30,13 +32,13 @@ function start({ source, registries, answers = {}, result = { application: 'rest
     removeBundle: async (name) => { removes.push(name); return typeof remove === 'function' ? remove() : remove },
   }
   const rt = {
-    ctx: { get: name => (name === 'pluginManager' ? pluginManager : name === 'profileContext' && profileDir ? { dir: profileDir } : undefined), effect() {} },
+    ctx: { get: name => (name === 'pluginManager' ? pluginManager : name === 'profileContext' && profileDir ? { dir: profileDir } : undefined), effect(fn, label) { effects.push([label, fn]) } },
     config,
     home,
     warn: (...args) => warnings.push(args),
   }
-  install(rt)
-  return { rt, fetched, installs, removes, warnings }
+  install(rt, { edition })
+  return { rt, fetched, installs, removes, warnings, effects }
 }
 
 test('versions compare in semver order and lose their v and build metadata', () => {
@@ -143,7 +145,7 @@ test('a linked checkout, an unversioned git install, or a disabled check never a
     const view = await rt.updateCheck()
     assert.equal(view.available, false)
     assert.deepEqual(fetched, [])
-    assert.throws(() => rt.updateStart(), /No DS Bot update/)
+    assert.throws(() => rt.updateStart(), /No ANVIL Crew update/)
   }
   const { rt, fetched } = start({ source: `${PKG.name}@^${PKG.version}`, config: { updateCheck: false } })
   assert.equal((await rt.updateCheck({ fresh: true })).available, false)
@@ -158,7 +160,7 @@ test('in the desktop app, which updates as a whole, it never asks the network an
   assert.equal(view.source, 'app')
   assert.equal(view.available, false)
   assert.deepEqual(fetched, [])
-  assert.throws(() => rt.updateStart(), /No DS Bot update/)
+  assert.throws(() => rt.updateStart(), /No ANVIL Crew update/)
 })
 
 test('the star count comes from the repository, is kept for an hour, and survives a failed answer', async () => {
@@ -204,7 +206,7 @@ test('a check that finds nothing clears the version a check before it found', as
   const linked = await rt.updateCheck({ fresh: true })
   assert.equal(linked.available, false)
   assert.equal(linked.latest, null)
-  assert.throws(() => rt.updateStart(), /No DS Bot update/)
+  assert.throws(() => rt.updateStart(), /No ANVIL Crew update/)
   // Back on the registry with no copy answering: the offer stays cleared.
   delete answers[latest]
   setSource(`^${PKG.version}`)
@@ -413,4 +415,105 @@ test('a note that cannot be read is warned about and deleted', async () => {
   assert.equal(warnings.length, 1)
   assert.equal(existsSync(join(home, 'update.json')), false)
   rmSync(home, { recursive: true, force: true, maxRetries: 5 })
+})
+
+// The ANVIL edition is installed from a commit of the owner's fork. It is managed by the owner's
+// fabric: it never asks npm or GitHub for a newer version (which could only be the upstream
+// release) and never installs one over itself.
+const EDITION_ANSWERS = {
+  [`https://registry.npmjs.org/${PKG.name}/latest`]: { version: '9.0.0' },
+  'https://api.github.com/repos/Fei2411/DS-Bot/releases/latest': { tag_name: 'v9.0.0', html_url: 'https://github.com/Fei2411/DS-Bot/releases/tag/v9.0.0' },
+}
+
+test('this package names its edition, and an upstream release names none', () => {
+  assert.equal(editionOf(PKG), 'anvil')
+  assert.equal(PKG.dsBot.base, PKG.version)
+  assert.equal(editionOf({ name: 'ds-bot' }), null)
+  assert.equal(editionOf({ dsBot: { edition: '' } }), null)
+  assert.equal(editionOf({ dsBot: { verifiedDsh: '1.0.0' } }), null)
+})
+
+test('an edition install is managed by the fabric: no network call, no update to offer', async () => {
+  for (const source of [`${PKG.name}@^${PKG.version}`, 'github:Fei2411/DS-Bot#v0.3.2&path:/ds-bot', 'github:naytewilson/DS-Bot#anvil/edition&path:/ds-bot', undefined]) {
+    const { rt, fetched, installs, effects } = start({ source, answers: EDITION_ANSWERS, edition: 'anvil' })
+    const view = await rt.updateCheck({ fresh: true })
+    assert.deepEqual(fetched, [], String(source))
+    assert.equal(view.available, false)
+    assert.equal(view.latest, null)
+    assert.equal(view.source, 'fabric')
+    assert.equal(view.managed, true)
+    assert.equal(view.edition, 'anvil')
+    assert.equal(view.base, PKG.dsBot.base)
+    assert.equal(view.phase, 'idle')
+    // The first check at startup is not scheduled either.
+    assert.deepEqual(effects, [])
+    assert.deepEqual(installs, [])
+  }
+})
+
+test('an edition install refuses to start an update, whatever the client asks', async () => {
+  const { rt, fetched, installs, removes } = start({ source: `${PKG.name}@^${PKG.version}`, answers: EDITION_ANSWERS, edition: 'anvil' })
+  await rt.updateCheck({ fresh: true })
+  assert.throws(() => rt.updateStart(), /managed by your fabric/)
+  assert.deepEqual([fetched, installs, removes], [[], [], []])
+  assert.equal(rt.updateView().phase, 'idle')
+})
+
+test('turning update checks off changes nothing for an edition: it still says who manages it', async () => {
+  const { rt } = start({ edition: 'anvil', config: { updateCheck: false } })
+  const view = await rt.updateCheck()
+  assert.equal(view.managed, true)
+  assert.equal(view.source, 'fabric')
+  assert.equal(view.available, false)
+})
+
+test('the upstream release, with no edition, still checks and installs as before', async () => {
+  const { rt, fetched } = start({ source: `${PKG.name}@^${PKG.version}`, answers: EDITION_ANSWERS, edition: null })
+  const view = await rt.updateCheck({ fresh: true })
+  assert.equal(fetched.length, 1)
+  assert.equal(view.available, true)
+  assert.equal(view.managed, false)
+  assert.equal(view.edition, null)
+  assert.equal(view.base, null)
+})
+
+// install.test.js pins the effects of this package, an edition, which has no update check. The
+// upstream release's own startup check was pinned there too; it is pinned here, where the
+// upstream behaviour can be started.
+test('the upstream release registers its update check as an effect and runs it once after startup', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { rt, fetched, effects } = start({ source: `${PKG.name}@^${PKG.version}`, answers: EDITION_ANSWERS, edition: null })
+  assert.deepEqual(effects.map(([label]) => label), ['ds-bot: update check'])
+  // Nothing is asked at install time: the first check waits out the startup delay.
+  const cleanup = effects[0][1]()
+  assert.deepEqual(fetched, [])
+  t.mock.timers.tick(14_999)
+  await flush()
+  assert.deepEqual(fetched, [])
+  t.mock.timers.tick(1)
+  await flush()
+  assert.equal(fetched.length, 1)
+  assert.equal(rt.updateView().available, true)
+  cleanup()
+})
+
+test('the upstream release\'s pending first check is cancelled when the effect is disposed', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { fetched, effects } = start({ source: `${PKG.name}@^${PKG.version}`, answers: EDITION_ANSWERS, edition: null })
+  const cleanup = effects[0][1]()
+  cleanup()
+  t.mock.timers.tick(60_000)
+  await flush()
+  assert.deepEqual(fetched, [])
+})
+
+test('the upstream release registers no update check when checks are turned off', () => {
+  const { effects } = start({ source: `${PKG.name}@^${PKG.version}`, answers: EDITION_ANSWERS, edition: null, config: { updateCheck: false } })
+  assert.deepEqual(effects, [])
+})
+
+test('the module started the way the host starts it reads this package\'s own edition', async () => {
+  const { rt } = start({ source: `${PKG.name}@^${PKG.version}`, answers: EDITION_ANSWERS, edition: editionOf(PKG) })
+  assert.equal(rt.updateView().managed, true)
+  assert.equal(rt.updateView().source, 'fabric')
 })

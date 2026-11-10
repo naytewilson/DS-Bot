@@ -1,5 +1,6 @@
 // Prompt: one section whose text depends only on the rendering Session's own Bot
 // record, so the prefix stays byte-stable across turns and roster changes.
+import { BRAND, UPSTREAM } from '../shared/brand.js'
 
 const TEAM_RULES = [
   '## How your Bot team works',
@@ -37,8 +38,23 @@ const MAIN_RULES = [
   '- The team can have more than one Main Bot; list_bots marks them. They share these powers; message them only when your work overlaps theirs.',
 ].join('\n')
 
+export const STANDING_RULES_MAX = 4000
+
+// `config.teamRules`: standing rules the user wrote for their environment, appended to every
+// Bot's prompt after the built-in team rules. Empty or missing adds nothing.
+export function standingRules(value) {
+  if (typeof value !== 'string') return ''
+  let text = value.trim().slice(0, STANDING_RULES_MAX)
+  // Never end on half a character.
+  if (/[\uD800-\uDBFF]$/u.test(text)) text = text.slice(0, -1)
+  text = text.trim()
+  return text === '' ? '' : `## Standing rules from the user's environment\n${text}`
+}
+
 export function install(rt) {
   const { ctx } = rt
+  // Read once: the prompt prefix must not change under a running Session.
+  const standing = standingRules(rt.config?.teamRules)
 
   // A group Session renders exactly its Bot's text, so both share one cached prefix.
   const promptFor = (id) => {
@@ -47,10 +63,11 @@ export function install(rt) {
     if (bot !== undefined) {
       return [
         '# Your identity',
-        `You are ${bot.name}, a Bot on the user's team in DS Bot.${bot.role ? ` Your role: ${bot.role}.` : ''}`,
+        `You are ${bot.name}, a Bot on the user's team in ${BRAND} (built on ${UPSTREAM}).${bot.role ? ` Your role: ${bot.role}.` : ''}`,
         bot.instructions ? `\n${bot.instructions}` : '',
         '',
         rt.isMain(self) ? `${MAIN_RULES}\n\n${TEAM_RULES}` : TEAM_RULES,
+        ...(standing === '' ? [] : ['', standing]),
       ].join('\n')
     }
     const room = rt.roomOf(id)

@@ -93,6 +93,9 @@ export function install(rt) {
     browser: rt.browserEnabled,
     // False when config.memory turns memory off: no Memory row or panel.
     memory: rt.memoryEnabled !== false,
+    // Whether the ANVIL fabric view is on (config.fabric); the status itself is the
+    // 'fabric-status' endpoint, which probes the machines and so is asked for on its own.
+    fabric: rt.fabric?.enabled === true,
     // Set while another dsh host holds the team (store.js): why this one cannot change it.
     readOnly: rt.readOnly() ?? null,
     // IM connections (settings → IM): one per chat-app bot the user added.
@@ -139,7 +142,7 @@ export function install(rt) {
   }
   // What a host that only reads the team may still answer.
   // Updates change the dsh profile, not the team, so a reading host may run them too.
-  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'thinking', 'avatar-library', 'computer-system-status', 'computer-shot', 'local-agents', 'local-agent-models'])
+  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'thinking', 'avatar-library', 'computer-system-status', 'computer-shot', 'local-agents', 'local-agent-models', 'fabric-status'])
 
   async function setPrefs(body) {
     if (body.theme !== undefined) {
@@ -583,6 +586,10 @@ export function install(rt) {
           return ok(rt.dshUpdateStart?.())
         case 'repo-stars':
           return ok(await rt.repoStars())
+        // The ANVIL fabric: this host, its peers, the hub, ANVIL OS and SIEVE. Every probe
+        // fails on its own inside the answer, so this endpoint does not fail with them.
+        case 'fabric-status':
+          return ok(rt.fabric === undefined ? { enabled: false } : await rt.fabric.status({ fresh: body.fresh === true }))
         // The Desktop window's long poll for read_browser, and its answers.
         case 'browser-wait': {
           if (rt.browserChannel === undefined) return fail('Bot browsers are off on this host', 'bot/browser-off')

@@ -7,6 +7,7 @@
 // Every line follows the model. Its declared window, less the room its reply
 // needs, is the usable context; the check line is a share of that.
 import { estimateTokens } from './text.js'
+import { BRAND } from '../shared/brand.js'
 
 // For a model that declares no window.
 export const DEFAULT_WINDOW = 500_000
@@ -108,7 +109,7 @@ export function checkpointCount(messages) {
 }
 
 export const CHECKPOINT_PROMPT = [
-  'You are now writing a checkpoint of this conversation. This request comes from DS Bot, not from the user: do not answer or continue the messages above.',
+  `You are now writing a checkpoint of this conversation. This request comes from ${BRAND}, not from the user: do not answer or continue the messages above.`,
   'The messages above are about to be replaced by your checkpoint. What the user and other Bots sent you travels along word for word, so do not copy it; the full record also stays saved, and read_own_chat searches it. Write a summary that lets you carry on the work as if nothing had been cut:',
   '',
   '- Where the work stands: what is done, and what is under way and how far it got.',

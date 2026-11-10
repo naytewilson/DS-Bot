@@ -5,6 +5,7 @@
 // carries read requests back; the client answers with `browser-result`.
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { output } from './tools.js'
+import { BRAND } from '../shared/brand.js'
 
 // A waiting client counts as present; one that has not polled for this long is gone.
 const CLIENT_STALE_MS = 30_000
@@ -146,7 +147,7 @@ export function createBrowserChannel({ now = Date.now, waitMs = WAIT_MS, staleMs
 
   function dispose() {
     for (const client of clients.values()) client.end?.()
-    for (const id of [...pending.keys()]) settle(id, { error: 'DS Bot stopped before the page was read.' })
+    for (const id of [...pending.keys()]) settle(id, { error: `${BRAND} stopped before the page was read.` })
     clients.clear()
     holds.clear()
   }
@@ -232,7 +233,7 @@ export function pageText(page, { from = 0, size = TEXT_PAGE, itemsMax = ITEMS_MA
   return lines.join('\n')
 }
 
-export const NO_BROWSER = 'Your browser panel is not open. It exists only in the desktop apps (DSH Desktop and DS Bot): ask the user to click your name at the top of your chat, open the browser from there, and load the page.'
+export const NO_BROWSER = `Your browser panel is not open. It exists only in the desktop apps (DSH Desktop and ${BRAND}): ask the user to click your name at the top of your chat, open the browser from there, and load the page.`
 export const NO_PAGE = 'Your browser panel has no page open yet. Ask the user to load the page there first.'
 
 const OPEN_MAX = 64

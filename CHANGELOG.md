@@ -4,6 +4,26 @@ All notable changes to DS Bot are listed here. The format follows [Keep a Change
 
 ## [Unreleased]
 
+### Added
+
+- The ANVIL edition, shown as **ANVIL Crew**: an anvil mark, a cold-steel and ember theme as the default, a first Main Bot that wears the anvil, a loading state for the sidebar and the main pane, and a title, home-screen name and icons of its own. (`ds-bot` edition `anvil`, `src/shared/brand.js`)
+- Settings → Fabric shows this host (load, memory, disks), its peer machines, the fabric and ANVIL OS services, the ANVIL hub's truth board and what SIEVE keeps out of the model's context, refreshing every 30 seconds while it is open. A Fabric chip beside the account button shows the state at a glance and opens it. (`fabric-status`)
+- Bots get four ANVIL tools: `fabric_status`, `anvil_findings`, `anvil_log` and `anvil_decision` (Main Bot only). New plugin config keys `fabric`, `teamRules` (standing rules added to every Bot's prompt) and `capabilities` (MCP servers seeded into the library, marked "From configuration").
+- The `bot-shell` plugin (`ds-bot/shell`) serves the web manifest, the favicons and the home-screen icons ahead of DSH's own, and rewrites the page title, `apple-mobile-web-app-title` and `theme-color`, so the page installs on an iPhone as ANVIL Crew. `scripts/brand-icons.mjs` renders the PNGs from the SVG sources on a Mac.
+
+### Changed
+
+- The product is called ANVIL Crew in the interface, the diagnostics report, group notices, IM replies, the sign-in pages and the text the Bots read; the Chinese copy follows. Package, plugin id, routes and saved data keep their upstream names.
+- An edition install is managed by its fabric: it no longer asks npm or GitHub for a newer version, shows no update card, refuses an install request, and Settings → About says "Managed by your fabric" beside "ANVIL edition" and the upstream version it is built on.
+
+### Fixed
+
+- The fabric view no longer lets a program or a listener grow the host: a status program runs in a process group of its own and the whole group is stopped at its time limit (and at most one run of a probe command line is alive at once), and a SIEVE stats answer is read through a 64 KiB counter without following redirects.
+- On a Mac the Fabric page and `fabric_status` show the kernel's memory pressure (the free percentage behind Activity Monitor) instead of the count of never-used pages, which read as an exhausted machine.
+- `anvil_decision` refuses text that looks like a key, token, password or ID number, records at most 10 decisions in 10 minutes and the same one once an hour, and tells the model that a timed-out run may already have written the entry. What the hub, the findings ledger and the machines return is cleaned of credentials and the home folder before a Bot reads it.
+- A server removed from `config.capabilities` is now removed from the library, the Bots and the packs it was seeded into at the next start, and `bots: main` limits a configured server to Main Bots.
+- An app that bundles the ANVIL edition no longer runs the upstream desktop updater. The error log downloads as `anvil-crew-diagnostics.log`, the avatar-format error and a slow peer's timeout are translated, and the Fabric page's clock stops while its tab is hidden.
+
 ## [0.3.2] - 2026-11-09
 
 ### Added
