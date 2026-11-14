@@ -14,6 +14,7 @@ import {
   OWNER_SECRET_EXACT,
   ATTRIBUTION_KEYS,
   createEgressController,
+  install as installEgress,
   scrubOwnerTokens,
   validateLeaseGrant,
   workDepthOf,
@@ -865,7 +866,7 @@ test('host pre-step blocked turn/end and agent/disposed tear down suspended tool
       },
     },
   }
-  rt.egress = createEgressController(rt)
+  installEgress(rt)
   installLocalAgents(rt)
   assert.ok(registeredAdapter, 'expected local-agents adapter to register')
   t.after(() => registeredAdapter.dispose())
