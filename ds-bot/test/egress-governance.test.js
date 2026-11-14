@@ -902,3 +902,124 @@ test('host pre-step blocked turn/end and agent/disposed tear down suspended tool
     try { process.kill(pids.orphanPid, 'SIGKILL') } catch { /* already gone */ }
   }
 })
+
+test('post-turn memory-review gates botShot through governed egress.admit and fails closed with zero LLM calls on revoked or unresolvable sessions', async (t) => {
+  const { writeFileSync } = await import('node:fs')
+  const { createRuntime } = await import('../index.js')
+  const home = mkdtempSync(join(tmpdir(), 'dsb-memreview-gov-'))
+  t.after(() => rmSync(home, { recursive: true, force: true }))
+
+  writeFileSync(join(home, 'state.json'), JSON.stringify({
+    version: 1,
+    mainBotIds: ['m1'],
+    revision: 1,
+    whaleStored: true,
+    bots: {
+      m1: { id: 'm1', sessionId: 'm1', name: 'Chief', role: 'Chief of Staff', model: 'deepseek/v4', instructions: '', createdAt: 1 },
+      b2: { id: 'b2', sessionId: 'b2', name: 'Writer', role: 'Writer', model: 'deepseek/v4', instructions: '', createdAt: 2 },
+    },
+    rooms: {},
+    exchanges: [],
+    exchangeTurns: {},
+    questions: {},
+  }))
+
+  const history = [
+    { event: { seq: 20, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'I prefer concise bullet summaries.' }] } } },
+    { event: { seq: 21, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'Noted.' }] } } } },
+  ]
+  const agentsMap = new Map([
+    ['m1', { id: 'm1', session: { id: 'm1', seq: 22 } }],
+    ['b2', { id: 'b2', session: { id: 'b2', seq: 22 } }],
+  ])
+  let allowAdmit = false
+  const admitCalls = []
+  const requests = []
+  const replies = []
+
+  const ctx = fakeContext({
+    services: {
+      agents: agentsMap,
+      anvilBridge: { status: agent => ({ session_ref: `ns1_${agent.id}` }) },
+      anvilAuthority: {
+        async admit(payload) {
+          admitCalls.push(payload)
+          if (!allowAdmit) throw new EgressDeniedError('ANVIL admission denied: lease revoked')
+          return validGrant(payload.session_ref, payload.session_ref.slice(4))
+        },
+      },
+    },
+  })
+  Object.assign(ctx, {
+    llm: {
+      listProviders: () => [{ id: 'deepseek', name: 'DeepSeek' }],
+      listModels: async () => [{ id: 'v4' }],
+      resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'off' }] } }),
+      async* stream(request) {
+        requests.push(request)
+        const text = replies.shift() ?? '{"changes":[]}'
+        yield { type: 'text-delta', index: 0, text }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    },
+    sessionController: {
+      resolveAgent: async sessionId => {
+        const agent = agentsMap.get(sessionId)
+        if (!agent) throw new Error(`unknown session ${sessionId}`)
+        return { agent }
+      },
+      selectModel: async () => {},
+      page: async ({ beforeSeq, maxMessages }) => {
+        const all = history.filter(record => beforeSeq === undefined || record.event.seq < beforeSeq)
+        const records = maxMessages === undefined ? all : all.slice(-maxMessages)
+        return { records, hasMore: records.length < all.length }
+      },
+    },
+    sessions: { messageProjections: [] },
+    workspaceRegistry: { archiveSession: async () => {} },
+  })
+
+  let route
+  const origRegister = ctx.connection.fetch.register
+  ctx.connection.fetch.register = (options) => {
+    route = options
+    return origRegister(options)
+  }
+  createRuntime(ctx, { home, memoryReviewDelayMs: 5 })
+  t.after(() => ctx.dispose())
+
+  const callState = async () => {
+    const res = await route.fetch(new Request('http://localhost/api/bot', { method: 'POST', body: JSON.stringify({ endpoint: 'state', payload: {} }) }))
+    return (await res.json()).value
+  }
+  const waitForReviews = async () => waitUntil(async () => (await callState()).memoryReviews === 0, { timeoutMs: 5_000, message: 'memoryReviews did not drain' })
+
+  // 1) Lease revoked between turn completion and delayed memory-review -> 0 LLM calls.
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'running' })
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'idle' })
+  await waitUntil(() => admitCalls.length >= 1, { timeoutMs: 3_000, message: 'memory-review did not check admit' })
+  await waitForReviews()
+  assert.equal(admitCalls[0].purpose, 'memory-review')
+  assert.equal(admitCalls[0].key, 'chat:b2')
+  assert.equal(requests.length, 0, 'revoked memory-review must not invoke ctx.llm.stream')
+  assert.equal(existsSync(join(home, 'memory', 'bots', 'b2', 'MEMORY.md')), false)
+
+  // 2) Unresolvable live agent -> fails closed cleanly with 0 LLM calls.
+  agentsMap.delete('b2')
+  allowAdmit = true
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'running' })
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'idle' })
+  await new Promise(r => setTimeout(r, 40))
+  await waitForReviews()
+  assert.equal(requests.length, 0, 'unresolvable memory-review must not invoke ctx.llm.stream')
+
+  // 3) Restored valid lease -> memory-review admits and reviews the preserved unread lines.
+  agentsMap.set('b2', { id: 'b2', session: { id: 'b2', seq: 22 } })
+  replies.push('```json\n{"changes":[{"op":"add","text":"The user prefers concise bullet summaries"}]}\n```')
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'running' })
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'idle' })
+  await waitUntil(() => requests.length === 1, { timeoutMs: 3_000, message: 'admitted memory-review did not run botShot' })
+  await waitForReviews()
+  const saved = readFileSync(join(home, 'memory', 'bots', 'b2', 'MEMORY.md'), 'utf8')
+  assert.match(saved, /The user prefers concise bullet summaries/)
+})
