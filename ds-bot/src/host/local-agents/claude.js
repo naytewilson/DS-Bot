@@ -2,6 +2,7 @@
 // stdin takes user/control JSON messages; stdout streams the assistant's
 // events until a `result` ends the turn.
 import { cleanEnv, spawnAgent } from './discover.js'
+import { envKeyOf, killProcessGroup } from '../egress.js'
 
 // Claude Code tools that only read; the rest may change files or run something.
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'TodoWrite', 'NotebookRead'])
@@ -15,22 +16,28 @@ export class ClaudeEngine {
   }
 
   // A live process holds its own event queue; the adapter drains it.
-  open(dshSessionId, { cwd, resumeId, system, mode, mcp, model }) {
+  open(dshSessionId, { cwd, resumeId, system, mode, mcp, model, env }) {
+    const nextEnvKey = envKeyOf(env)
     let session = this.sessions.get(dshSessionId)
-    if (session !== undefined && session.dead) session = undefined
+    if (session !== undefined && (session.dead || (session.envKey !== undefined && session.envKey !== nextEnvKey))) {
+      session.kill({ force: true })
+      session = undefined
+    }
     if (session === undefined) {
       session = new ClaudeSession(this, dshSessionId)
+      session.envKey = nextEnvKey
       this.sessions.set(dshSessionId, session)
     }
-    return session.start({ cwd, resumeId, system, mode, mcp, model })
+    return session.start({ cwd, resumeId, system, mode, mcp, model, env })
   }
 
   prompt(session, blocks) {
     return session.prompt(blocks)
   }
 
-  cancel(session) {
+  cancel(session, { force = false } = {}) {
     session.cancel()
+    if (force) session.kill({ force: true })
   }
 
   // The adapter stopped reading this session. A process takes its model and tool
@@ -73,7 +80,7 @@ class ClaudeSession {
     try { this.child?.stdin.write(`${JSON.stringify(message)}\n`) } catch { this.dead = true }
   }
 
-  async start({ cwd, resumeId, system, mode, mcp, model }) {
+  async start({ cwd, resumeId, system, mode, mcp, model, env }) {
     if (this.child !== undefined) return this
     const bin = this.engine.findExecutable(this.engine.engine.command)
     if (bin === undefined) throw Object.assign(new Error(`${this.engine.engine.name} is not installed`), { code: 'NO_ADAPTER' })
@@ -99,7 +106,7 @@ class ClaudeSession {
     }
     this.resumeId = resumeId
     const child = this.child = spawnAgent(bin, args, {
-      env: cleanEnv(this.engine.env ?? {}),
+      env: cleanEnv({ ...this.engine.engine.env, ...env }),
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -236,11 +243,11 @@ class ClaudeSession {
     this.write({ type: 'control_request', request: { subtype: 'interrupt' } })
   }
 
-  kill() {
+  kill({ force = false } = {}) {
     this.dead = true
-    this.child?.kill('SIGTERM')
-    setTimeout(() => { try { this.child?.kill('SIGKILL') } catch {} }, 5_000).unref?.()
+    const child = this.child
     this.child = undefined
+    if (child !== undefined) killProcessGroup(child, { graceMs: force ? 0 : 250 })
   }
 }
 

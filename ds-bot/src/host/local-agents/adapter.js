@@ -3,9 +3,10 @@
 // API: the loop, Sessions, tools and approvals are the ordinary ones; this
 // adapter turns each request into a prompt for the CLI session the Session is
 // mapped to, and the CLI's output back into stream chunks.
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
 import { textOf } from '../text.js'
+import { createEgressController, EgressDeniedError } from '../egress.js'
 import { engineOf, cliMode } from './engines.js'
 import { LoopbackMcp } from './mcp.js'
 
@@ -48,17 +49,19 @@ function digestChunks(messages) {
   ]
 }
 
-// Marks the one retry of a turn whose saved Claude conversation was gone.
+// Marks the one retry of a turn whose saved Claude conversation was gone, and retry budget keys.
 const RESUME_RETRIED = Symbol('resume retried')
+const RETRY_KEY = Symbol('retry key')
 
 export class LocalAgentAdapter extends LlmAdapter {
-  // deps: {rt, findExecutable, spawnEngine(kind,route,engine), record(sessionId),
+  // deps: {rt, egress, findExecutable, spawnEngine(kind,route,engine), record(sessionId),
   //        saveRecord, dropRecord, presetFor(sessionId), toolsFor(options), signInHint(route),
   //        usedModels(route)}
   constructor(deps) {
     super()
     this.deps = deps
-    this.engines = new Map()   // route -> engine driver
+    this.egress = deps.egress ?? (deps.rt?.ctx ? createEgressController(deps.rt) : undefined)
+    this.engines = new Map()   // route[\0scopeKey] -> engine driver
     this.live = new Map()      // sessionId -> live session
     this.modelCache = new Map()
     this.probes = new Map()    // route -> the probe under way
@@ -72,13 +75,14 @@ export class LocalAgentAdapter extends LlmAdapter {
   providerRetryPolicy() { return undefined }
   imageRequestPricing() { return undefined }
 
-  engine(route) {
-    let driver = this.engines.get(route)
+  engine(route, scopeKey) {
+    const key = scopeKey ? `${route}\u0000${scopeKey}` : route
+    let driver = this.engines.get(key)
     if (driver === undefined) {
       const spec = engineOf(route, this.deps.customAgents())
       if (spec === undefined) throw new LlmError(`Unknown local agent ${route}`, 'NO_ADAPTER')
       driver = this.deps.spawnEngine(spec.kind, route, spec)
-      this.engines.set(route, driver)
+      this.engines.set(key, driver)
     }
     return driver
   }
@@ -137,12 +141,14 @@ export class LocalAgentAdapter extends LlmAdapter {
 
   // ---------------------------------------------------------------------------
   // The live bridge for one DS Bot Session.
-  async liveFor(options) {
+  async liveFor(options, admission) {
     const sessionId = String(options.sessionId)
     let live = this.live.get(sessionId)
     const record = this.deps.record(sessionId)
     const route = options.provider
-    if (live !== undefined && !live.dead && live.route === route) {
+    const governed = Boolean(admission?.governed)
+    const scopeKey = governed ? admission.scopeKey : undefined
+    if (live !== undefined && !live.dead && live.route === route && Boolean(live.governed) === governed && (!governed || live.scopeKey === scopeKey)) {
       // An agent CLI can exit between the spawn and its first message (a failed
       // sign-in, for one): the cached bridge is dead, so the next call starts a
       // new process instead of writing into the one that is gone.
@@ -154,16 +160,27 @@ export class LocalAgentAdapter extends LlmAdapter {
         // instead of reading its exit as the new turn's failure.
         live.events.length = 0
       }
+      live.lease = admission?.lease ?? null
+      live.attributionEnv = admission?.env
       // A CLI takes its model when its session opens. Another model reopens the same
       // CLI session as soon as no turn runs in it.
       if (live.model === options.model || live.state !== 'idle') return live
       await this.closeLive(live, { idle: true })
-    } else if (live !== undefined) await this.closeLive(live)
+    } else if (live !== undefined) {
+      if (live.state !== 'idle') this.stopTurn(live, 'local agent session replaced', { forceKill: true, close: false })
+      await this.closeLive(live)
+    }
     const spec = engineOf(route, this.deps.customAgents())
     if (spec === undefined) throw new LlmError(`Unknown local agent ${route}`, 'LOCAL_AGENT_MISSING')
-    const engine = this.engine(route)
+    const engine = this.engine(route, scopeKey)
     live = {
       sessionId, route, spec, engine, dead: false,
+      governed, scopeKey,
+      lease: admission?.lease ?? null,
+      attributionEnv: admission?.env,
+      releaseSlot: undefined,
+      expiryTimer: undefined,
+      activeSignal: undefined,
       record,
       cliSessionId: record?.cliSessionId,
       handed: record?.handedId,
@@ -197,10 +214,14 @@ export class LocalAgentAdapter extends LlmAdapter {
     return live
   }
 
-  async closeLive(live, { idle = false } = {}) {
+  async closeLive(live, { idle = false, error } = {}) {
     if (live.dead) return
     live.dead = true
     clearTimeout(live.idle)
+    clearTimeout(live.expiryTimer)
+    live.expiryTimer = undefined
+    live.releaseSlot?.()
+    live.releaseSlot = undefined
     this.live.delete(live.sessionId)
     live.engine.forget?.(live.sessionId)
     live.mcp?.close()
@@ -210,19 +231,36 @@ export class LocalAgentAdapter extends LlmAdapter {
       live.engineSession = undefined
       live.started = false
     }
-    for (const waiter of live.waiters.splice(0)) waiter({ type: 'done', reason: 'stop' })
+    const terminal = error === undefined ? { type: 'done', reason: 'stop' } : { type: 'error', error }
+    if (live.waiters.length > 0) {
+      for (const waiter of live.waiters.splice(0)) waiter(terminal)
+    } else if (error !== undefined) {
+      live.events.push(terminal)
+    }
     const stillUsed = [...this.live.values()].some(other => other.engine === live.engine && !other.dead)
-    if (!stillUsed) await live.engine.close?.().catch(() => {})
+    if (!stillUsed) {
+      await live.engine.close?.({ force: !idle || live.governed }).catch(() => {})
+      if (live.governed) {
+        for (const [key, engine] of this.engines) {
+          if (engine === live.engine) this.engines.delete(key)
+        }
+      }
+    }
   }
 
   // The turn under way ends: the CLI stops, and a call it waits on gets an answer.
-  stopTurn(live, reason) {
+  stopTurn(live, reason, { forceKill = false, close = false, error } = {}) {
     live.state = 'idle'
     live.queue.length = 0
-    if (live.engineSession !== undefined) live.engine.cancel?.(live.engineSession)
+    clearTimeout(live.expiryTimer)
+    live.expiryTimer = undefined
+    live.releaseSlot?.()
+    live.releaseSlot = undefined
+    if (live.engineSession !== undefined) live.engine.cancel?.(live.engineSession, { force: forceKill })
     live.mcp?.failAll(new Error(reason))
     for (const pending of live.pending.values()) pending.resolve({ text: reason, isError: true })
     live.pending.clear()
+    if (close) void this.closeLive(live, { error })
   }
 
   // The Session left this CLI: its part moved on. Its process leaves; the CLI session
@@ -260,7 +298,21 @@ export class LocalAgentAdapter extends LlmAdapter {
   async ensureMcp(live, tools) {
     live.tools = tools
     if (live.mcp !== undefined) return live.mcp
-    const mcp = new LoopbackMcp(() => live.tools(), ({ name, arguments: args, callId }) => {
+    const mcp = new LoopbackMcp(() => live.tools(), async ({ name, arguments: args, callId }) => {
+      if (live.governed && this.egress) {
+        try {
+          await this.egress.admit({
+            sessionId: live.sessionId,
+            purpose: 'local-agent-mcp-call',
+            detail: { tool: name },
+            signal: live.activeSignal,
+          })
+        } catch (error) {
+          const denied = toLlmError(error, live)
+          this.stopTurn(live, denied.message, { forceKill: true, close: true, error: denied })
+          throw denied
+        }
+      }
       const dshCallId = `dsbot-${callId}`
       return new Promise((resolve) => {
         live.pending.set(dshCallId, { name, mcpCallId: callId, resolve })
@@ -287,7 +339,42 @@ export class LocalAgentAdapter extends LlmAdapter {
     }
     const sessionId = options.sessionId
     if (sessionId === undefined) throw new LlmError('a local agent request needs a session', 'INVALID_REQUEST')
-    const live = await this.liveFor(options)
+    let admission = { governed: false, lease: null, env: {}, scopeKey: undefined }
+    if (this.egress) {
+      try {
+        const turnInfo = this.deps.rt?.live?.get?.(sessionId)?.info
+        const workIds = [this.deps.rt?.workOf?.(turnInfo), ...(options.workIds ?? [])].filter(Boolean)
+        this.egress.assertDepth(workIds)
+        admission = await this.egress.admit({
+          sessionId,
+          purpose: 'local-agent-turn',
+          detail: { route: options.provider, model: options.model },
+          signal: options.signal,
+        })
+      } catch (error) {
+        const denied = toLlmError(error)
+        const existingLive = this.live.get(String(sessionId))
+        if (existingLive !== undefined) {
+          this.stopTurn(existingLive, denied.message, { forceKill: true, close: false })
+          await this.closeLive(existingLive, { error: denied })
+        }
+        throw denied
+      }
+    }
+    const retryKey = options[RETRY_KEY] ?? `turn:${sessionId}:${randomUUID()}`
+    const live = await this.liveFor(options, admission)
+    if (live.releaseSlot === undefined && this.egress) {
+      try {
+        live.releaseSlot = this.egress.acquireChildSlot(`local-agent:${sessionId}`, (why) => {
+          this.stopTurn(live, why, { forceKill: true, close: true, error: new LlmError(why, 'ANVIL_DENIED') })
+        })
+      } catch (error) {
+        const denied = toLlmError(error, live)
+        this.stopTurn(live, denied.message, { forceKill: true, close: false })
+        await this.closeLive(live, { error: denied })
+        throw denied
+      }
+    }
 
     // What the request carries past the last handed message. When the marker is
     // gone the CLI session is stale or new: it gets a replay instead of a delta.
@@ -348,6 +435,7 @@ export class LocalAgentAdapter extends LlmAdapter {
         mode,
         preset,
         model: options.model,
+        env: live.attributionEnv,
         // Codex carries the team instructions as developer config on a new
         // thread; Claude gets them appended at spawn; ACP reads them in the
         // first prompt below.
@@ -355,7 +443,11 @@ export class LocalAgentAdapter extends LlmAdapter {
         system: live.spec.kind === 'claude' ? instructions : undefined,
       }
       live.engineSession = await live.engine.open(sessionId, openArgs)
-        .catch(error => { throw toLlmError(error, live) })
+        .catch((error) => {
+          live.releaseSlot?.()
+          live.releaseSlot = undefined
+          throw toLlmError(error, live)
+        })
       // A resumed CLI reports its id only with `system/init`: keep the saved one
       // in the meantime, or a resume that fails would erase it.
       const reportedId = live.engineSession.acpSessionId ?? live.engineSession.threadId ?? live.engineSession.cliSessionId
@@ -424,7 +516,10 @@ export class LocalAgentAdapter extends LlmAdapter {
 
     try {
       yield* this.drain(live, options)
+      if (live.state === 'idle') this.egress?.resetRetryBudget?.(retryKey)
     } catch (error) {
+      live.releaseSlot?.()
+      live.releaseSlot = undefined
       // The caller sees the failure now: a start that died before reading its
       // prompt must not count as delivered, in case the host restarts next.
       this.rollbackUnread(live, sessionId)
@@ -432,7 +527,8 @@ export class LocalAgentAdapter extends LlmAdapter {
       // history, once, so the user sees the answer instead of this failure.
       if (live.resumeLost === true && options[RESUME_RETRIED] !== true) {
         live.resumeLost = false
-        yield* this.stream({ ...options, [RESUME_RETRIED]: true })
+        try { this.egress?.checkRetryBudget?.(retryKey) } catch (budgetError) { throw toLlmError(budgetError, live) }
+        yield* this.stream({ ...options, [RESUME_RETRIED]: true, [RETRY_KEY]: retryKey })
         return
       }
       throw error
@@ -492,16 +588,34 @@ export class LocalAgentAdapter extends LlmAdapter {
     }
     // One abort promise for the whole drain: the earlier version added a
     // listener per event and never removed it.
+    live.activeSignal = options.signal
     let abortReject
     const abortPromise = new Promise((_, reject) => { abortReject = reject })
     const onAbort = () => abortReject(options.signal?.reason ?? new Error('aborted'))
     if (options.signal?.aborted) onAbort()
     else options.signal?.addEventListener('abort', onAbort)
+    if (live.governed && Number.isSafeInteger(live.lease?.lease_expires_at_ms)) {
+      const nowMs = typeof this.deps.rt?.now === 'function' ? this.deps.rt.now() : Date.now()
+      const remaining = live.lease.lease_expires_at_ms - nowMs
+      if (remaining <= 0) {
+        const expired = new LlmError('ANVIL lease expired', 'ANVIL_DENIED')
+        this.stopTurn(live, expired.message, { forceKill: true, close: false })
+        await this.closeLive(live, { error: expired })
+        options.signal?.removeEventListener('abort', onAbort)
+        throw expired
+      }
+      clearTimeout(live.expiryTimer)
+      live.expiryTimer = setTimeout(() => {
+        const expired = new LlmError('ANVIL lease expired', 'ANVIL_DENIED')
+        this.stopTurn(live, expired.message, { forceKill: true, close: true, error: expired })
+      }, Math.min(remaining, 2_147_483_647))
+      live.expiryTimer.unref?.()
+    }
     try {
     for (;;) {
       const event = await Promise.race([live.next(), abortPromise]).catch(error => ({ type: 'abort', error }))
       if (event.type === 'abort') {
-        this.stopTurn(live, 'the turn was stopped')
+        this.stopTurn(live, 'the turn was stopped', { forceKill: live.governed || live.spec.kind === 'claude', close: live.governed })
         yield { type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'the turn was stopped' } } }
         return
       }
@@ -564,17 +678,24 @@ export class LocalAgentAdapter extends LlmAdapter {
             this.sendInput(live, next, options.signal, options.reasoningEffort)
             break
           }
+          live.releaseSlot?.()
+          live.releaseSlot = undefined
           yield { type: 'finish', reason: { kind: 'stop' } }
           return
         }
         case 'error': {
           live.state = 'idle'
+          live.releaseSlot?.()
+          live.releaseSlot = undefined
           throw toLlmError(event.error, live)
         }
         default: break
       }
     }
     } finally {
+      clearTimeout(live.expiryTimer)
+      live.expiryTimer = undefined
+      live.activeSignal = undefined
       options.signal?.removeEventListener('abort', onAbort)
     }
   }
@@ -640,11 +761,13 @@ function renderReplay(messages, system) {
 function toLlmError(error, live) {
   if (error instanceof LlmError) return error
   const text = String(error?.message ?? error)
-  const code = error?.code === 'NO_ADAPTER' ? 'LOCAL_AGENT_MISSING'
-    : /not signed in|not logged in|login required|unauthorized|authentication/i.test(text) ? 'LOCAL_AGENT_SIGNIN'
-      : /quota|rate.?limit|usage limit|exceeded/i.test(text) ? 'LOCAL_AGENT_QUOTA'
-        : /exited|spawn|ENOENT/i.test(text) ? 'LOCAL_AGENT_EXIT'
-          : error?.code ?? 'LOCAL_AGENT_ERROR'
+  const code = error instanceof EgressDeniedError || error?.code === 'ANVIL_DENIED' || error?.code === 'DEPTH_EXCEEDED' || error?.code === 'CONCURRENCY_LIMIT' || error?.code === 'RETRY_LIMIT'
+    ? error.code
+    : error?.code === 'NO_ADAPTER' ? 'LOCAL_AGENT_MISSING'
+      : /not signed in|not logged in|login required|unauthorized|authentication/i.test(text) ? 'LOCAL_AGENT_SIGNIN'
+        : /quota|rate.?limit|usage limit|exceeded/i.test(text) ? 'LOCAL_AGENT_QUOTA'
+          : /exited|spawn|ENOENT/i.test(text) ? 'LOCAL_AGENT_EXIT'
+            : error?.code ?? 'LOCAL_AGENT_ERROR'
   const hint = code === 'LOCAL_AGENT_SIGNIN' ? ` Sign in with: ${live?.spec?.signIn ?? `${live?.spec?.command ?? 'the CLI'} login`}.` : ''
   return new LlmError(`${text}${hint}`, code, error?.status === undefined ? {} : { status: error.status })
 }

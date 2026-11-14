@@ -6,14 +6,16 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
 import { BRAND } from '../../shared/brand.js'
+import { OWNER_ENV_PREFIXES, OWNER_SECRET_EXACT, scrubOwnerTokens } from '../egress.js'
 
-// The CLI signs in by itself; an API key or another agent's backend variable in
-// our environment would shadow that or leak, so neither reaches the child.
+// The CLI signs in by itself; an API key, owner secret, or another agent's
+// backend variable in our environment would shadow that or leak, so neither reaches the child.
 const DROP_EXACT = new Set([
   'ACP_BACKEND', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
   'CLAUDE_CODE_OAUTH_TOKEN', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'XAI_API_KEY', 'ELECTRON_RUN_AS_NODE',
+  ...OWNER_SECRET_EXACT,
 ])
-const DROP_PREFIX = ['DS_BOT_', 'DSH_']
+const DROP_PREFIX = ['DS_BOT_', 'DSH_', ...OWNER_ENV_PREFIXES]
 
 export function cleanEnv(extra = {}) {
   const env = {}
@@ -25,7 +27,7 @@ export function cleanEnv(extra = {}) {
   // needs the same folders to find its interpreter. Windows spells it `Path`.
   const pathKey = Object.keys(env).find(key => key.toUpperCase() === 'PATH') ?? 'PATH'
   env[pathKey] = searchDirs().join(delimiter)
-  return { ...env, ...extra }
+  return { ...env, ...scrubOwnerTokens(extra) }
 }
 
 // A command's output, or undefined. Never synchronous: this runs inside the DSH
@@ -131,9 +133,13 @@ export function launchOf(executable, args, { platform = process.platform, readFi
 }
 
 // spawn() for an agent CLI, also when Windows found it as a `.cmd` shim.
-export function spawnAgent(executable, args, options) {
+export function spawnAgent(executable, args, options = {}) {
   const launch = launchOf(executable, args)
-  return spawn(launch.file, launch.args, { ...options, ...launch.options })
+  return spawn(launch.file, launch.args, {
+    detached: options.detached ?? (process.platform !== 'win32'),
+    ...options,
+    ...launch.options,
+  })
 }
 
 // One `--version` call, bounded; the version line is for display only.

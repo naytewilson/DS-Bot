@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { createEgressController, readService } from './egress.js'
 import { encodeUrlComponent } from './secrets.js'
 import { own } from './store.js'
 
@@ -6,6 +7,61 @@ const MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
 const NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 const SECRET_REFERENCE = /\$DSH_SECRET_([A-Z][A-Z0-9_]*)/g
 const ENSURE_TIMEOUT_MS = 15_000
+const DEFAULT_HEALTH_PROBE_MS = 15_000
+
+export const DEFAULT_CAPABILITY_RETRY = Object.freeze({
+  initialDelayMs: 500,
+  maxDelayMs: 30_000,
+  maxAttempts: 24,
+})
+
+const MCP_LOG_RE = /^mcp-client\(([^)]+)\):\s*(.+)$/i
+const RUNTIME_DISCONNECT_RE = /connection lost|giving up after|failed generation could not confirm|tool re-sync failed/i
+
+function errorTexts(error) {
+  const parts = []
+  let cur = error
+  for (let i = 0; i < 4 && cur !== undefined && cur !== null; i += 1) {
+    if (typeof cur === 'string') parts.push(cur)
+    else {
+      if (cur.code) parts.push(String(cur.code))
+      if (cur.syscall) parts.push(String(cur.syscall))
+      if (cur.message) parts.push(String(cur.message))
+    }
+    cur = typeof cur === 'object' ? cur.cause : undefined
+  }
+  return parts.join(' | ')
+}
+
+export function classifyCapabilityError(error, item) {
+  if (error?.permanent === true || error?.configError === true) return { permanent: true, kind: 'config' }
+  if (error?.transient === true) return { permanent: false, kind: 'transient' }
+  if (error?.code === 'NO_ADAPTER') return { permanent: true, kind: 'missing-binary' }
+  const text = errorTexts(error)
+  if (/Limited to Main Bots|Unknown Bot|Secret .+ is missing or unavailable/i.test(text)) {
+    return { permanent: true, kind: 'config' }
+  }
+  if (/no current ANVIL observation|session observation unavailable|temporarily unavailable/i.test(text)) {
+    return { permanent: false, kind: 'transient' }
+  }
+  if (error?.code === 'ANVIL_DENIED') return { permanent: true, kind: 'authority' }
+  if (/ANVIL admission denied|lease expired|foreign agent|mismatched session|foreign native_id|stale lease|invalid lease/i.test(text)) {
+    return { permanent: true, kind: 'authority' }
+  }
+  if (/serverName .+ already in use|exceeds maxInstructionBytes|Method not found|Unsupported protocol|Invalid params|-3260[012]|protocol mismatch|invalid configuration/i.test(text)) {
+    return { permanent: true, kind: 'protocol' }
+  }
+  if (/EACCES|EPERM|\b(?:401|403)\b|unauthorized|forbidden|permission denied|authentication failed|invalid[_ ]token|invalid_client/i.test(text)) {
+    return { permanent: true, kind: 'auth' }
+  }
+  const missingBinary = (/spawn\s+.+\s+ENOENT|ENOENT:\s*spawn|command not found|is not installed/i.test(text)
+    || (error?.code === 'ENOENT' && typeof error?.syscall === 'string' && error.syscall.startsWith('spawn')))
+    && !/\.sock\b|daemon listening/i.test(text)
+  if (missingBinary || (item?.command && text.includes(`spawn ${item.command} ENOENT`))) {
+    return { permanent: true, kind: 'missing-binary' }
+  }
+  return { permanent: false, kind: 'transient' }
+}
 
 // Connector ids are reserved: a capability named like one would collide with
 // its mcp__<id>__* tool prefix. The connectors module registers its ids here.
@@ -132,11 +188,47 @@ export function install(rt) {
   // One reconcile chain per Agent: a slow MCP server holds up only its own Agent.
   const chains = new WeakMap()
   const queued = new WeakSet()
+  const supervisors = new WeakMap() // agent -> Map<name, supervisor>
+  const healthTimers = new WeakMap()
+  const observedLoggers = new WeakSet()
   const sessionStatuses = new Map()
+  const egress = rt.egress ?? (ctx ? createEgressController(rt) : undefined)
   let pluginPromise
   let scheduled = null
   let loadingSecrets = 0
   let stopped = false
+
+  const retryPolicy = () => ({
+    ...DEFAULT_CAPABILITY_RETRY,
+    ...rt.capabilityRetryPolicy,
+  })
+  const getSup = (agent, name) => {
+    let byName = supervisors.get(agent)
+    if (!byName) supervisors.set(agent, byName = new Map())
+    let sup = byName.get(name)
+    if (!sup) byName.set(name, sup = { generation: 0, retryTimer: undefined, attempts: 0, lastKey: undefined, lastPermanent: false })
+    return sup
+  }
+  const clearRetry = (sup) => {
+    if (!sup?.retryTimer) return
+    clearTimeout(sup.retryTimer)
+    sup.retryTimer = undefined
+  }
+  const clearAgentTimers = (agent) => {
+    const byName = supervisors.get(agent)
+    if (byName) {
+      for (const sup of byName.values()) {
+        sup.generation += 1
+        clearRetry(sup)
+      }
+      byName.clear()
+    }
+    const timer = healthTimers.get(agent)
+    if (timer) {
+      clearInterval(timer)
+      healthTimers.delete(agent)
+    }
+  }
 
   const library = () => state.capabilities.items
   const ensureLibrary = () => {
@@ -446,57 +538,282 @@ export function install(rt) {
   const resolveList = (list, botId) => (list ?? []).map(raw => String(raw).replace(SECRET_REFERENCE, (_match, name) => secretFor(name, botId)))
   const configFor = (item, botId) => {
     if (item.kind === 'skill') return { name: item.name, description: item.description, content: item.content }
-    if (item.transport === 'stdio') return { transport: 'stdio', serverName: item.name, command: item.command, args: resolveList(item.args, botId), env: resolveValues(item.env, botId), failOnStartupError: true }
-    return { transport: 'streamable-http', serverName: item.name, url: resolveUrl(item.url, botId), headers: resolveValues(item.headers, botId), failOnStartupError: true }
+    const reconnect = { enabled: false }
+    if (item.transport === 'stdio') return { transport: 'stdio', serverName: item.name, command: item.command, args: resolveList(item.args, botId), env: resolveValues(item.env, botId), failOnStartupError: true, reconnect }
+    return { transport: 'streamable-http', serverName: item.name, url: resolveUrl(item.url, botId), headers: resolveValues(item.headers, botId), failOnStartupError: true, reconnect }
   }
   const disposeMount = async mount => {
     if (mount?.fiber) await Promise.resolve().then(() => mount.fiber.dispose()).catch(() => {})
   }
+  const probeMcpAlive = async (agent, serverName) => {
+    const mcpResources = readService(agent?.ctx, 'mcpResources')
+    if (typeof mcpResources?.request !== 'function') return { alive: true }
+    try {
+      await mcpResources.request(serverName, { method: 'resources/list' }, { agent })
+      return { alive: true }
+    } catch (error) {
+      return { alive: false, error }
+    }
+  }
+  const readDiscoveredTools = (agent, serverName) => {
+    const toolsSvc = readService(agent?.ctx, 'tools')
+    if (typeof toolsSvc?.schemas !== 'function') return undefined
+    const prefix = `mcp__${serverName}__`
+    try {
+      return toolsSvc.schemas(agent).filter(def => typeof def?.name === 'string' && def.name.startsWith(prefix)).map(def => def.name)
+    } catch {
+      return undefined
+    }
+  }
+  const scheduleRetry = (agent, name, myGen) => {
+    if (stopped) return
+    const sessionId = agent?.session?.id
+    if (typeof sessionId !== 'string' || agents.get(sessionId)?.deref() !== agent) return
+    const sup = getSup(agent, name)
+    if (sup.generation !== myGen) return
+    clearRetry(sup)
+    const policy = retryPolicy()
+    sup.attempts += 1
+    if (sup.attempts > policy.maxAttempts) {
+      rt.warn?.('ds-bot: capability %s for %s exceeded max retries (%d)', name, sessionId, policy.maxAttempts)
+      return
+    }
+    const baseDelay = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** (sup.attempts - 1))
+    const jitter = policy.jitterRatio ? Math.floor(baseDelay * policy.jitterRatio * Math.random()) : 0
+    const delayMs = Math.max(1, baseDelay + jitter)
+    sup.retryTimer = setTimeout(() => {
+      sup.retryTimer = undefined
+      if (stopped || sup.generation !== myGen || agents.get(sessionId)?.deref() !== agent) return
+      const currentBot = botOfSession(sessionId)
+      if (!currentBot || !expandCapabilityNames(currentBot.capabilities, library()).has(name)) return
+      void reconcileOne(agent)
+    }, delayMs)
+    sup.retryTimer.unref?.()
+  }
+  const handleRuntimeDisconnect = async (agent, name, reason) => {
+    const sessionId = agent?.session?.id
+    if (stopped || typeof sessionId !== 'string' || agents.get(sessionId)?.deref() !== agent) return
+    const agentMounts = mounts.get(agent)
+    const existing = agentMounts?.get(name)
+    if (!existing || existing.connected !== true) return
+    const sup = getSup(agent, name)
+    sup.generation += 1
+    const myGen = sup.generation
+    existing.connected = false
+    agentMounts.delete(name)
+    const bot = botOfSession(sessionId)
+    const message = rt.redactSecrets(String(reason || 'MCP server disconnected')).slice(0, 300)
+    if (bot) statusSet(bot.id, name, sessionId, { state: 'error', error: message })
+    await disposeMount(existing)
+    if (stopped || sup.generation !== myGen || agents.get(sessionId)?.deref() !== agent) return
+    const item = own(library(), name)
+    if (!item) return
+    const currentBot = botOfSession(sessionId)
+    if (!currentBot || !expandCapabilityNames(currentBot.capabilities, library()).has(name)) return
+    const { permanent } = classifyCapabilityError(new Error(message), item)
+    sup.lastPermanent = permanent
+    if (!permanent) scheduleRetry(agent, name, myGen)
+  }
+  const dispatchDisconnectLog = (text, { logFiber, logger } = {}) => {
+    const match = MCP_LOG_RE.exec(text)
+    if (!match || !RUNTIME_DISCONNECT_RE.test(match[2])) return
+    const [, serverName, detail] = match
+    const uid = logFiber?.uid
+    for (const [, ref] of agents) {
+      const target = ref.deref()
+      if (!target) continue
+      const mount = mounts.get(target)?.get(serverName)
+      if (!mount || mount.connected !== true) continue
+      if (uid !== undefined && mount.fiber?.uid !== undefined) {
+        if (mount.fiber.uid !== uid) continue
+        void handleRuntimeDisconnect(target, serverName, `${serverName}: ${detail}`)
+      } else if (logger === undefined || target.ctx?.logger === logger) {
+        void handleRuntimeDisconnect(target, serverName, `${serverName}: ${detail}`)
+      }
+    }
+  }
+  if (typeof ctx?.logger?.exporter === 'function') {
+    try {
+      ctx.logger.exporter({
+        colors: 0,
+        export(message) {
+          if (stopped) return
+          const text = Array.isArray(message?.args)
+            ? message.args.map(part => String(part ?? '')).join(' ')
+            : String(message?.content ?? '')
+          dispatchDisconnectLog(text, { logFiber: message?.fiber?.deref?.() })
+        },
+      })
+    } catch { /* fallback handled by per-agent observeLogger */ }
+  }
+  const observeLogger = (agent) => {
+    const logger = agent?.ctx?.logger
+    if (!logger || typeof logger.exporter === 'function' || observedLoggers.has(logger)) return
+    observedLoggers.add(logger)
+    for (const level of ['warn', 'error']) {
+      const original = logger[level]
+      if (typeof original !== 'function') continue
+      try {
+        logger[level] = function (...args) {
+          dispatchDisconnectLog(args.map(part => String(part ?? '')).join(' '), { logger })
+          return original.apply(this, args)
+        }
+      } catch { /* frozen logger object */ }
+    }
+  }
+  const ensureHealthMonitor = (agent) => {
+    if (stopped || healthTimers.has(agent)) return
+    const mcpResources = readService(agent?.ctx, 'mcpResources')
+    const intervalMs = rt.capabilityHealthProbeMs ?? (typeof mcpResources?.request === 'function' ? DEFAULT_HEALTH_PROBE_MS : undefined)
+    if (!intervalMs || intervalMs <= 0) return
+    const timer = setInterval(() => {
+      if (stopped || agents.get(agent?.session?.id)?.deref() !== agent) {
+        clearInterval(timer)
+        healthTimers.delete(agent)
+        return
+      }
+      const agentMounts = mounts.get(agent)
+      if (!agentMounts || agentMounts.size === 0) return
+      for (const [name, mount] of agentMounts) {
+        if (mount.connected !== true || mount.kind !== 'mcp') continue
+        void probeMcpAlive(agent, mount.serverName ?? name).then((probe) => {
+          if (!probe.alive) void handleRuntimeDisconnect(agent, name, probe.error?.message ?? 'server is disconnected')
+        })
+      }
+    }, intervalMs)
+    timer.unref?.()
+    healthTimers.set(agent, timer)
+  }
   const mountOne = async (agent, bot, agentMounts, name) => {
     const sessionId = agent.session.id
     const item = own(library(), name)
-    const drop = async () => {
-      await disposeMount(agentMounts.get(name))
+    const sup = getSup(agent, name)
+    const drop = async (keepRetry = false) => {
+      sup.generation += 1
+      if (!keepRetry) clearRetry(sup)
+      const prev = agentMounts.get(name)
       agentMounts.delete(name)
+      await disposeMount(prev)
     }
     if (item.kind === 'mcp' && item.transport === 'stdio' && item.approved !== true) {
       await drop()
       statusSet(bot.id, name, sessionId, { state: 'needs-approval' })
       return
     }
+    let admission = { governed: false, env: {}, scopeKey: undefined }
+    if (item.kind === 'mcp' && egress?.isGoverned?.()) {
+      try {
+        admission = await egress.admit({
+          agent,
+          sessionId,
+          purpose: 'capability-mount',
+          detail: { capability: name, transport: item.transport },
+          waitForBirth: true,
+        })
+      } catch (error) {
+        const prev = agentMounts.get(name)
+        sup.generation += 1
+        const myGen = sup.generation
+        clearRetry(sup)
+        agentMounts.delete(name)
+        await disposeMount(prev)
+        if (stopped || sup.generation !== myGen || agents.get(sessionId)?.deref() !== agent) return
+        sup.lastKey = undefined
+        const { permanent } = classifyCapabilityError(error, item)
+        sup.lastPermanent = permanent
+        statusSet(bot.id, name, sessionId, { state: 'error', error: rt.redactSecrets(String(error?.message ?? error)).slice(0, 300) })
+        if (!permanent) scheduleRetry(agent, name, myGen)
+        return
+      }
+    }
     let config
     try {
       config = configFor(item, bot.id)
     } catch (error) {
       await drop()
+      sup.lastPermanent = true
       statusSet(bot.id, name, sessionId, { state: 'error', error: rt.redactSecrets(error.message).slice(0, 300) })
       return
     }
-    const key = `${name}:${createHash('sha256').update(JSON.stringify(config)).digest('hex')}`
-    if (agentMounts.get(name)?.key === key) return
-    await drop()
-    statusSet(bot.id, name, sessionId, { state: 'connecting' })
-    try {
-      const plugin = item.kind === 'skill'
-        ? {
-          name: `ds-bot-capability-skill-${name}`,
-          inject: ['skills'],
-          apply(c) {
-            c.effect(() => c.skills.register({ name: config.name, description: config.description, source: 'runtime', content: config.content }))
-          },
-        }
-        : await loadMcpPlugin()
-      if (stopped) return
-      const fiber = item.kind === 'skill' ? agent.ctx.plugin(plugin) : agent.ctx.plugin(plugin, config)
-      agentMounts.set(name, { key, fiber })
-      await fiber.await()
-      if (stopped || agents.get(sessionId)?.deref() !== agent) return
-      statusSet(bot.id, name, sessionId, { state: 'ready' })
-    } catch (error) {
-      await drop()
-      const message = rt.redactSecrets([error, error?.cause].filter(Boolean).map(part => String(part?.message ?? part)).join(': ') || 'Connection failed').slice(0, 300)
-      statusSet(bot.id, name, sessionId, { state: 'error', error: message })
+    const keyBase = admission.governed ? { config, scope: admission.scopeKey } : config
+    const key = `${name}:${createHash('sha256').update(JSON.stringify(keyBase)).digest('hex')}`
+    const existing = agentMounts.get(name)
+    if (existing?.key === key) {
+      if (existing.inFlight) return existing.inFlight
+      if (existing.connected) {
+        if (item.kind !== 'mcp') return
+        const probe = await probeMcpAlive(agent, item.name)
+        if (probe.alive) return
+      }
     }
+    if (sup.lastKey !== key) {
+      sup.attempts = 0
+      sup.lastPermanent = false
+      sup.lastKey = key
+    } else if (sup.lastPermanent) {
+      return
+    }
+    clearRetry(sup)
+    await drop(true)
+    const myGen = sup.generation
+    observeLogger(agent)
+    statusSet(bot.id, name, sessionId, { state: 'connecting' })
+    const mount = { key, fiber: null, connected: false, kind: item.kind, serverName: item.name, tools: [], inFlight: undefined }
+    agentMounts.set(name, mount)
+    let fiber
+    const run = (async () => {
+      try {
+        const plugin = item.kind === 'skill'
+          ? {
+            name: `ds-bot-capability-skill-${name}`,
+            inject: ['skills'],
+            apply(c) {
+              c.effect(() => c.skills.register({ name: config.name, description: config.description, source: 'runtime', content: config.content }))
+            },
+          }
+          : await loadMcpPlugin()
+        if (stopped || sup.generation !== myGen || agents.get(sessionId)?.deref() !== agent || agentMounts.get(name) !== mount) {
+          if (agentMounts.get(name) === mount) agentMounts.delete(name)
+          return
+        }
+        const mountConfig = item.kind === 'mcp' && item.transport === 'stdio' && admission.governed
+          ? { ...config, env: { ...config.env, ...admission.env } }
+          : config
+        fiber = item.kind === 'skill' ? agent.ctx.plugin(plugin) : agent.ctx.plugin(plugin, mountConfig)
+        mount.fiber = fiber
+        await fiber.await()
+        if (stopped || sup.generation !== myGen || agents.get(sessionId)?.deref() !== agent || agentMounts.get(name) !== mount) {
+          await disposeMount({ fiber })
+          return
+        }
+        if (item.kind === 'mcp') {
+          const probe = await probeMcpAlive(agent, item.name)
+          if (!probe.alive) throw probe.error ?? new Error(`${item.name}: server is disconnected`)
+          if (stopped || sup.generation !== myGen || agents.get(sessionId)?.deref() !== agent || agentMounts.get(name) !== mount) {
+            await disposeMount({ fiber })
+            return
+          }
+          mount.tools = readDiscoveredTools(agent, item.name) ?? []
+        }
+        mount.connected = true
+        mount.inFlight = undefined
+        sup.attempts = 0
+        sup.lastPermanent = false
+        statusSet(bot.id, name, sessionId, { state: 'ready' })
+        if (item.kind === 'mcp') ensureHealthMonitor(agent)
+      } catch (error) {
+        if (agentMounts.get(name) === mount) agentMounts.delete(name)
+        await disposeMount({ fiber })
+        if (stopped || sup.generation !== myGen || agents.get(sessionId)?.deref() !== agent) return
+        const message = rt.redactSecrets([error, error?.cause].filter(Boolean).map(part => String(part?.message ?? part)).join(': ') || 'Connection failed').slice(0, 300)
+        statusSet(bot.id, name, sessionId, { state: 'error', error: message })
+        const { permanent } = classifyCapabilityError(error, item)
+        sup.lastPermanent = permanent
+        if (!permanent) scheduleRetry(agent, name, myGen)
+      }
+    })()
+    mount.inFlight = run
+    return run
   }
   const reconcileAgent = async (agent, bot) => {
     const sessionId = agent.session.id
@@ -517,6 +834,12 @@ export function install(rt) {
     }
     for (const [name, mount] of agentMounts) {
       if (desired.has(name)) continue
+      const sup = supervisors.get(agent)?.get(name)
+      if (sup) {
+        sup.generation += 1
+        clearRetry(sup)
+        supervisors.get(agent).delete(name)
+      }
       await disposeMount(mount)
       agentMounts.delete(name)
     }
@@ -603,6 +926,15 @@ export function install(rt) {
       return
     }
     trackAgent(agent)
+    const byName = supervisors.get(agent)
+    if (byName) {
+      for (const sup of byName.values()) {
+        if (!sup.lastPermanent) {
+          clearRetry(sup)
+          sup.attempts = 0
+        }
+      }
+    }
     await prepare(agent, sessionId)
   }
   const trackAgent = agent => {
@@ -613,6 +945,7 @@ export function install(rt) {
     agent.ctx.effect(() => () => {
       if (agents.get(sessionId)?.deref() === agent) agents.delete(sessionId)
       clearSession(sessionId)
+      clearAgentTimers(agent)
       for (const mount of mounts.get(agent)?.values() ?? []) void disposeMount(mount)
       mounts.delete(agent)
     }, `ds-bot: capabilities ${sessionId}`)
@@ -696,6 +1029,11 @@ export function install(rt) {
     }).catch(error => rt.warn('ds-bot: capability startup failed: %s', error))
     return async () => {
       stopped = true
+      for (const ref of agents.values()) {
+        const agent = ref.deref()
+        if (agent) clearAgentTimers(agent)
+      }
+      for (const agent of mounts.keys()) clearAgentTimers(agent)
       const live = [...mounts.values()]
       mounts.clear()
       agents.clear()

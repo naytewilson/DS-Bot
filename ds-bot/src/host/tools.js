@@ -223,6 +223,11 @@ export function install(rt) {
         const seen = await rt.knownRequest(request)
         if (seen !== undefined) return answer(seen)
       }
+      const works = worksOf(exec)
+      rt.egress?.assertDepth?.(works)
+      if (rt.egress?.isGoverned?.()) {
+        await rt.egress.admit({ agent: exec.agent, sessionId: exec.agent?.id, purpose: 'team-delegation', detail: { tool: 'message_bot', to: target.id }, signal: exec.signal })
+      }
       if (room !== undefined) {
         const refusal = groupRefusal(room, sender, target)
         if (refusal !== undefined) refuse(refusal)
@@ -236,7 +241,6 @@ export function install(rt) {
       // sends the work round in a circle. Not a failed call: the turn goes on with
       // the work, and the result says where its answer goes instead of showing a
       // bare error the Bot cannot act on.
-      const works = worksOf(exec)
       if (rt.upstreamOf(works).has(target.id)) {
         return `Not sent: ${target.name} is waiting for the result of the work you are doing, and your answer reaches it by itself once everything you handed on is back. Finish the work and end your turn; to ask ${target.name} something, end your turn with the question.`
       }
@@ -340,6 +344,9 @@ export function install(rt) {
     async execute(args, exec) {
       await rt.load()
       if (!rt.isMain(rt.selfOf(exec.agent?.id))) return 'Only the Main Bot can create Bots. Ask the Main Bot instead.'
+      if (rt.egress?.isGoverned?.()) {
+        await rt.egress.admit({ agent: exec.agent, sessionId: exec.agent?.id, purpose: 'team-delegation', detail: { tool: 'create_bot', name: args.name }, signal: exec.signal })
+      }
       try {
         const avatar = args.avatar ? await readAvatar(String(args.avatar), { baseDir: rt.sessionFolder?.(exec.agent?.session ?? exec.agent), isData: rt.inData }) : undefined
         const workDir = args.work_dir ? await rt.cleanWorkDir(args.work_dir) : undefined
@@ -635,6 +642,11 @@ export function install(rt) {
       }
       const mentions = { ids: named, all: spans.some(span => span.all === true) }
       const reportBack = args.report_back === true
+      const callerWorks = worksOf(exec)
+      rt.egress?.assertDepth?.(callerWorks)
+      if (rt.egress?.isGoverned?.()) {
+        await rt.egress.admit({ agent: exec.agent, sessionId: exec.agent?.id, purpose: 'team-delegation', detail: { tool: 'post_to_group', group: room.id }, signal: exec.signal })
+      }
       if (member && reportBack && named.length === 0) {
         return 'Nobody would answer: your post only calls the members you name. Write "@Name" for each member who should answer, or post without report_back.'
       }
@@ -642,7 +654,7 @@ export function install(rt) {
       if (long === undefined) return tooLong(text)
       // Replies the poster waits for, while it works on what a Bot asked it for, are
       // work handed on for that request (handoffs.js).
-      const work = reportBack ? worksOf(exec).find(id => rt.ownsWork(self, id)) : undefined
+      const work = reportBack ? callerWorks.find(id => rt.ownsWork(self, id)) : undefined
       const sub = work === undefined ? undefined : randomUUID()
       if (sub !== undefined) rt.openWork(sub, { from: self, room: room.id, parent: work })
       try {
