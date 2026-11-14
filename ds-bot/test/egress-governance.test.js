@@ -1001,7 +1001,7 @@ test('post-turn memory-review gates botShot through governed egress.admit and fa
   await waitUntil(() => admitCalls.length >= 1, { timeoutMs: 3_000, message: 'memory-review did not check admit' })
   await waitForReviews()
   assert.equal(admitCalls[0].purpose, 'memory-review')
-  assert.equal(admitCalls[0].key, 'chat:b2')
+  assert.equal(admitCalls[0].target, 'chat:b2')
   assert.equal(requests.length, 0, 'revoked memory-review must not invoke ctx.llm.stream')
   assert.equal(existsSync(join(home, 'memory', 'bots', 'b2', 'MEMORY.md')), false)
 

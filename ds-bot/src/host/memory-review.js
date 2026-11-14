@@ -293,7 +293,7 @@ export function installReview(rt, memory) {
         if (sessionId === undefined || typeof rt.egress.admit !== 'function') {
           throw new Error('ANVIL admission denied: unresolvable keeper session for memory review')
         }
-        await rt.egress.admit({ sessionId, purpose: 'memory-review', detail: { key } })
+        await rt.egress.admit({ sessionId, purpose: 'memory-review', detail: { target: key } })
       }
       const { homeFiles, teamFiles } = await settled(() => ({ homeFiles: loadScope(home), teamFiles: loadScope(TEAM) }))
       const said = read.filter(line => line.who === 'user').map(line => line.text).join('\n')
