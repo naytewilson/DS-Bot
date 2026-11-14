@@ -821,3 +821,84 @@ test('authority-only mode rejects foreign ns1_ grants and AcpEngine/CodexEngine 
   assert.equal(codexSpawns[1].env.ANVIL_AGENT, 'dsh:chief')
   assert.equal(codexSpawns[1].env.ANVIL_OWNER_TOKEN, undefined)
 })
+
+test('host pre-step blocked turn/end and agent/disposed tear down suspended tool-calls CLI PGID, LoopbackMcp, and slot without calling stream()', async (t) => {
+  const { install: installLocalAgents } = await import('../src/host/local-agents/index.js')
+  const dir = mkdtempSync(join(tmpdir(), 'dsb-prestep-blocked-'))
+  const pidFile = join(dir, 'pids.json')
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+
+  let registeredAdapter
+  const ctx = fakeContext({
+    services: {
+      agents: new Map([['s-prestep', { id: 's-prestep', session: { id: 's-prestep', header: { cwd: dir } } }]]),
+      anvilBridge: { status: agent => ({ session_ref: `ns1_${agent.id}` }) },
+      anvilAuthority: { async admit({ session_ref }) { return validGrant(session_ref, 's-prestep') } },
+    },
+  })
+  ctx.llm = {
+    registerAdapter(_routes, adapter) {
+      registeredAdapter = adapter
+      return Object.assign(() => {}, { replace: () => {} })
+    },
+  }
+  ctx.agents = ctx.get('agents')
+  const rt = {
+    ctx,
+    warn: () => {},
+    save: async () => {},
+    load: async () => {},
+    selfOf: id => id,
+    botOf: id => ({ id, name: 'AcpBot', permission: 'workspace-write' }),
+    roomOf: () => undefined,
+    groupOwners: new Map(),
+    resolveAgent: async id => ctx.agents.get(id),
+    teamFolder: () => dir,
+    teamTools: [{ name: 'list_bots' }],
+    config: {},
+    state: {
+      bots: { 's-prestep': { id: 's-prestep', name: 'AcpBot', model: 'local-acp-probe/default', permission: 'workspace-write' } },
+      works: {},
+      localAgents: {
+        custom: [{ id: 'probe', name: 'Probe ACP', command: process.execPath, args: [PROBE_CLI, '--spawn-orphan', '--pid-out', pidFile] }],
+        sessions: {},
+      },
+    },
+  }
+  rt.egress = createEgressController(rt)
+  installLocalAgents(rt)
+  assert.ok(registeredAdapter, 'expected local-agents adapter to register')
+  t.after(() => registeredAdapter.dispose())
+
+  const turn1 = await collect(registeredAdapter.stream({
+    provider: 'local-acp-probe',
+    model: 'default',
+    sessionId: 's-prestep',
+    messages: [userMsg('m1', 'call-tool')],
+    tools: [{ name: 'list_bots', description: 'List bots', parameters: {} }],
+    signal: AbortSignal.timeout(10_000),
+  }))
+  assert.equal(turn1.finish?.kind, 'tool-calls')
+
+  const pids = await waitUntil(() => (existsSync(pidFile) ? JSON.parse(readFileSync(pidFile, 'utf8')) : null), { message: 'prestep pids missing' })
+  assert.equal(isPidAlive(pids.parentPid), true)
+  assert.equal(isPidAlive(pids.orphanPid), true)
+  const mcpServer = registeredAdapter.live.get('s-prestep')?.mcp?.server
+  assert.equal(mcpServer?.listening, true)
+  assert.equal(rt.egress.activeChildCount(), 1)
+
+  // Simulate dsh-anvil-bridge rejecting Step 2 at agent/pre-step -> dsh-agent-loop emits turn/end { reason: { kind: 'blocked' } } without calling stream().
+  for (const fn of ctx.listeners.get('session/event') ?? []) {
+    fn({ id: 's-prestep' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'blocked' } } })
+  }
+
+  await waitUntil(() => registeredAdapter.live.size === 0, { message: 'suspended live session survived blocked turn/end' })
+  assert.equal(rt.egress.activeChildCount(), 0, 'concurrency slot survived blocked turn/end')
+  assert.equal(mcpServer?.listening, false, 'LoopbackMcp survived blocked turn/end')
+  await waitUntil(() => !isPidAlive(pids.parentPid), { message: 'CLI parent survived blocked turn/end' })
+  if (process.platform !== 'win32') {
+    await waitUntil(() => !isPidAlive(pids.orphanPid), { message: 'CLI PGID survived blocked turn/end' })
+  } else {
+    try { process.kill(pids.orphanPid, 'SIGKILL') } catch { /* already gone */ }
+  }
+})

@@ -141,9 +141,27 @@ export function install(rt) {
   void rt.load?.().then(() => applyRoutes()).catch(() => {})
   // The callback returns the disposer: running adapter.dispose() inside the
   // setup would leave the adapter disposed from the moment it installs.
-  ctx.effect(() => () => {
-    void adapter.dispose()
-    registration?.()
+  ctx.effect(() => {
+    const offEvent = ctx.on?.('session/event', (session, event) => {
+      if (event?.type !== 'turn/end') return
+      const kind = event?.data?.reason?.kind
+      if (kind !== 'blocked' && kind !== 'aborted' && kind !== 'error') return
+      const sid = session?.id
+      if (sid === undefined) return
+      const live = adapter.live.get(String(sid))
+      if (live === undefined || (!live.governed && live.state !== 'suspended')) return
+      void adapter.terminateSession(sid, `turn ended (${kind})`, { forceKill: true })
+    })
+    const offDisposed = ctx.on?.('agent/disposed', ({ agent } = {}) => {
+      const sid = agent?.session?.id ?? agent?.id
+      if (sid !== undefined) void adapter.terminateSession(sid, 'agent disposed', { forceKill: true })
+    })
+    return () => {
+      offEvent?.()
+      offDisposed?.()
+      void adapter.dispose()
+      registration?.()
+    }
   }, 'ds-bot: local agents')
 
   // ---------------------------------------------------------------------------

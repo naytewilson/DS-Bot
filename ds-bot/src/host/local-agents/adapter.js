@@ -272,6 +272,18 @@ export class LocalAgentAdapter extends LlmAdapter {
     await this.closeLive(live, { idle: true })
   }
 
+  // Host-level turn rejection (e.g. dsh-anvil-bridge blocking agent/pre-step on
+  // Step 2 before stream() is called), user abort between tool-calls steps, or
+  // agent disposal must immediately tear down any suspended or governed CLI
+  // process group, LoopbackMcp listener, and concurrency slot.
+  async terminateSession(sessionId, reason = 'the turn was stopped', { forceKill = false } = {}) {
+    const live = this.live.get(String(sessionId))
+    if (live === undefined) return
+    const kill = forceKill || live.governed
+    this.stopTurn(live, reason, { forceKill: kill, close: false })
+    await this.closeLive(live, { idle: !kill, ...(kill ? { error: new LlmError(reason, 'ANVIL_DENIED') } : {}) })
+  }
+
   // A Claude CLI that died before `system/init` never read the prompt it was
   // handed: roll the marker back in the live state and in the saved record, so a
   // host that restarts before the next call still replays the input. ACP and
