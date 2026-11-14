@@ -3,6 +3,7 @@
 // session, created or resumed with our loopback MCP server attached.
 import { JsonRpcPeer, wireProcess, EventQueue } from './jsonrpc.js'
 import { cleanEnv, spawnAgent } from './discover.js'
+import { envKeyOf, killProcessGroup } from '../egress.js'
 import { acpMode } from './engines.js'
 
 const CLIENT = { name: 'ds-bot', version: '1' }
@@ -20,20 +21,28 @@ export class AcpEngine {
     this.findExecutable = findExecutable
     this.child = undefined
     this.peer = undefined
+    this.lastEnv = undefined
     this.sessions = new Map()
     this.caps = {}
     // The modes and options this CLI listed last, for a reply that lists none.
     this.listed = { modes: [], configOptions: [] }
   }
 
-  async ensure() {
-    if (this.peer !== undefined) return this.peer
+  async ensure(env) {
+    const effectiveEnv = env === undefined ? this.lastEnv : env
+    const nextEnvKey = effectiveEnv === undefined ? undefined : envKeyOf(effectiveEnv)
+    if (this.peer !== undefined) {
+      if (nextEnvKey === undefined || this.envKey === nextEnvKey) return this.peer
+      await this.close({ force: true })
+    }
+    this.lastEnv = effectiveEnv
     const bin = this.engine.command.startsWith('/') || this.engine.command.startsWith('~')
       ? this.findExecutable(this.engine.command)
       : this.findExecutable(this.engine.command)
     if (bin === undefined) throw Object.assign(new Error(`${this.engine.name} is not installed`), { code: 'NO_ADAPTER' })
+    this.envKey = nextEnvKey ?? envKeyOf(this.engine.env)
     const child = spawnAgent(bin, this.engine.args ?? [], {
-      env: cleanEnv(this.engine.env ?? {}),
+      env: cleanEnv({ ...this.engine.env, ...effectiveEnv }),
       stdio: ['pipe', 'pipe', 'inherit'],
       windowsHide: true,
     })
@@ -68,7 +77,7 @@ export class AcpEngine {
     // still waiting there: a reopened session needs a fresh one.
     if (session === undefined || session.dead) {
       const queue = new EventQueue()
-      session = { dshSessionId, acpSessionId: undefined, dead: false, modes: [], toolCalls: new Map(), push: event => queue.push(event), next: () => queue.next() }
+      session = { dshSessionId, acpSessionId: undefined, dead: false, env: session?.env, modes: [], toolCalls: new Map(), push: event => queue.push(event), next: () => queue.next() }
       this.sessions.set(dshSessionId, session)
     }
     return session
@@ -137,9 +146,10 @@ export class AcpEngine {
   }
 
   // A new or resumed ACP session for one DS Bot Session.
-  async open(dshSessionId, { cwd, mcp, resumeId, preset, model }) {
-    const peer = await this.ensure()
+  async open(dshSessionId, { cwd, mcp, resumeId, preset, model, env }) {
+    const peer = await this.ensure(env)
     const session = this.sessionFor(dshSessionId)
+    session.env = env
     const mcpServers = serversFor(mcp)
     if (mcp !== undefined && this.caps.mcpHttp === false) throw Object.assign(new Error(`${this.engine.name} cannot use HTTP MCP servers; the team tools cannot reach it`), { code: 'NOT_SUPPORTED' })
     const params = { cwd, mcpServers }
@@ -173,7 +183,7 @@ export class AcpEngine {
   }
 
   async setOption(session, category, value) {
-    const peer = await this.ensure()
+    const peer = await this.ensure(session?.env)
     try {
       const configId = configOptionsOf(session.configOptions ?? [], category)?.id ?? category
       await peer.request('session/set_config_option', { sessionId: session.acpSessionId, configId, value }, { timeout: 15_000 })
@@ -185,7 +195,7 @@ export class AcpEngine {
   }
 
   async prompt(session, blocks, { signal }) {
-    const peer = await this.ensure()
+    const peer = await this.ensure(session?.env)
     const reply = peer.request('session/prompt', { sessionId: session.acpSessionId, prompt: blocks }, { signal, timeout: 0 })
     reply.then(
       result => session.push({ type: 'done', reason: result?.stopReason ?? 'end_turn' }),
@@ -194,8 +204,9 @@ export class AcpEngine {
     return reply
   }
 
-  cancel(session) {
+  cancel(session, { force = false } = {}) {
     this.peer?.notify('session/cancel', { sessionId: session.acpSessionId })
+    if (force) void this.close({ force: true })
   }
 
   // The adapter stopped reading this session: a later open starts a new queue, or
@@ -204,14 +215,13 @@ export class AcpEngine {
     this.sessions.delete(dshSessionId)
   }
 
-  async close() {
+  async close({ force = false } = {}) {
     const child = this.child
     this.child = undefined
     this.peer = undefined
-    if (child !== undefined) {
-      child.kill('SIGTERM')
-      setTimeout(() => { try { child.kill('SIGKILL') } catch {} }, 5_000).unref?.()
-    }
+    this.envKey = undefined
+    this.lastEnv = undefined
+    if (child !== undefined) killProcessGroup(child, { graceMs: force ? 0 : 250 })
   }
 
   remember(reply) {

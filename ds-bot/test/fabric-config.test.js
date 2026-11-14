@@ -238,7 +238,7 @@ test('a configured stdio server mounts without waiting for approval; a Bot-made 
   await env.agentCreated('chief')
   assert.deepEqual(env.mounts.map(mount => mount.config.serverName).sort(), ['docs', 'files'])
   const files = env.mounts.find(mount => mount.config.serverName === 'files').config
-  assert.deepEqual(files, { transport: 'stdio', serverName: 'files', command: 'node', args: ['server.js', '8080'], env: { PORT: '8080', MODE: 'dev' }, failOnStartupError: true })
+  assert.deepEqual(files, { transport: 'stdio', serverName: 'files', command: 'node', args: ['server.js', '8080'], env: { PORT: '8080', MODE: 'dev' }, failOnStartupError: true, reconnect: { enabled: false } })
   assert.deepEqual(rt.capabilityStatusesView().chief, { files: { state: 'ready' }, docs: { state: 'ready' } })
 
   // The same command added by a Bot is not the user's: it waits.

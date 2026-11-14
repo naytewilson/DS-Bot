@@ -3,6 +3,7 @@
 // threads; turns stream item notifications back.
 import { JsonRpcPeer, wireProcess, EventQueue } from './jsonrpc.js'
 import { cleanEnv, spawnAgent } from './discover.js'
+import { envKeyOf, killProcessGroup } from '../egress.js'
 
 // The name the loopback MCP server is registered under in each thread's config.
 const MCP_SERVER = 'dsbot'
@@ -14,6 +15,7 @@ export class CodexEngine {
     this.findExecutable = findExecutable
     this.child = undefined
     this.peer = undefined
+    this.lastEnv = undefined
     this.threads = new Map()
   }
 
@@ -23,18 +25,25 @@ export class CodexEngine {
     // still waiting there: a resumed thread needs a fresh one.
     if (thread === undefined || thread.dead) {
       const queue = new EventQueue()
-      thread = { dshSessionId, threadId: undefined, dead: false, push: event => queue.push(event), next: () => queue.next() }
+      thread = { dshSessionId, threadId: undefined, dead: false, env: thread?.env, push: event => queue.push(event), next: () => queue.next() }
       this.threads.set(dshSessionId, thread)
     }
     return thread
   }
 
-  async ensure() {
-    if (this.peer !== undefined) return this.peer
+  async ensure(env) {
+    const effectiveEnv = env === undefined ? this.lastEnv : env
+    const nextEnvKey = effectiveEnv === undefined ? undefined : envKeyOf(effectiveEnv)
+    if (this.peer !== undefined) {
+      if (nextEnvKey === undefined || this.envKey === nextEnvKey) return this.peer
+      await this.close({ force: true })
+    }
+    this.lastEnv = effectiveEnv
     const bin = this.findExecutable(this.engine.command)
     if (bin === undefined) throw Object.assign(new Error(`${this.engine.name} is not installed`), { code: 'NO_ADAPTER' })
+    this.envKey = nextEnvKey ?? envKeyOf(this.engine.env)
     const child = spawnAgent(bin, this.engine.args ?? [], {
-      env: cleanEnv(this.engine.env ?? {}),
+      env: cleanEnv({ ...this.engine.env, ...effectiveEnv }),
       stdio: ['pipe', 'pipe', 'inherit'],
       windowsHide: true,
     })
@@ -114,9 +123,10 @@ export class CodexEngine {
     return Promise.reject({ code: -32601, message: `method not found: ${method}` })
   }
 
-  async open(dshSessionId, { cwd, mcp, resumeId, mode, instructions, model }) {
-    const peer = await this.ensure()
+  async open(dshSessionId, { cwd, mcp, resumeId, mode, instructions, model, env }) {
+    const peer = await this.ensure(env)
     const thread = this.threadFor(dshSessionId)
+    thread.env = env
     if (resumeId !== undefined) thread.threadId = resumeId
     // Codex 0.166 reads `ThreadStartParams` from the top level and takes the MCP
     // servers from `config`; it drops unknown keys without a word. So the fields keep
@@ -151,7 +161,7 @@ export class CodexEngine {
   }
 
   async prompt(thread, blocks, { signal, effort }) {
-    const peer = await this.ensure()
+    const peer = await this.ensure(thread?.env)
     const reply = await peer.request('turn/start', {
       threadId: thread.threadId,
       input: blocks.map(block => block.type === 'image' ? { type: 'image', url: block.url ?? block.data } : { type: 'text', text: block.text ?? '' }),
@@ -166,8 +176,9 @@ export class CodexEngine {
     await this.peer?.request('turn/steer', { threadId: thread.threadId, input: [{ type: 'text', text }] }, { timeout: 15_000 }).catch(() => {})
   }
 
-  cancel(thread) {
+  cancel(thread, { force = false } = {}) {
     this.peer?.request('turn/interrupt', { threadId: thread.threadId, turnId: thread.turnId }, { timeout: 15_000 }).catch(() => {})
+    if (force) void this.close({ force: true })
   }
 
   // The adapter stopped reading this thread: a later open starts a new queue, or
@@ -198,14 +209,13 @@ export class CodexEngine {
     })
   }
 
-  async close() {
+  async close({ force = false } = {}) {
     const child = this.child
     this.child = undefined
     this.peer = undefined
-    if (child !== undefined) {
-      child.kill('SIGTERM')
-      setTimeout(() => { try { child.kill('SIGKILL') } catch {} }, 5_000).unref?.()
-    }
+    this.envKey = undefined
+    this.lastEnv = undefined
+    if (child !== undefined) killProcessGroup(child, { graceMs: force ? 0 : 250 })
   }
 }
 

@@ -86,6 +86,7 @@ export function install(rt) {
 
   const adapter = new LocalAgentAdapter({
     rt,
+    egress: rt.egress,
     customAgents,
     findExecutable,
     spawnEngine,

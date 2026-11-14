@@ -7,6 +7,8 @@ import { randomBytes, randomUUID } from 'node:crypto'
 
 const PROTOCOL_VERSION = '2025-03-26'
 const KEEPALIVE_MS = 20_000
+const MAX_BODY_BYTES = 4 * 1024 * 1024
+const MAX_INFLIGHT_CALLS = 64
 
 // Several CLIs refuse schemas with unions, refs or const, so every schema is
 // flattened to plain JSON Schema before tools/list.
@@ -102,24 +104,32 @@ export class LoopbackMcp {
   // tools/call answers on an SSE stream: progress notifications keep the agent
   // patient while DSH runs the call, then the result arrives on the same stream.
   serveCall({ id, params }, response) {
+    if (this.calls.size >= MAX_INFLIGHT_CALLS) {
+      response.writeHead(429, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32000, message: 'too many concurrent MCP calls' } }))
+      return
+    }
     const callId = `mcp-${randomUUID()}`
     const progressToken = params?._meta?.progressToken ?? callId
+    const abortController = new AbortController()
+    let settled = false
     response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
     const send = (value) => { try { response.write(`data: ${JSON.stringify(value)}\n\n`) } catch {} }
+    const finish = (payload) => {
+      if (settled) return
+      settled = true
+      clearInterval(timer)
+      this.calls.delete(callId)
+      send(payload)
+      response.end()
+    }
+    response.once('close', () => {
+      if (!settled) abortController.abort(new Error('MCP client disconnected'))
+    })
     const entry = {
       progress: 0,
-      settle: (result) => {
-        clearInterval(timer)
-        this.calls.delete(callId)
-        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: result.text }], isError: result.isError === true } })
-        response.end()
-      },
-      cancel: () => {
-        clearInterval(timer)
-        this.calls.delete(callId)
-        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'the call was cancelled' }], isError: true } })
-        response.end()
-      },
+      settle: (result) => finish({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: result.text }], isError: result.isError === true } }),
+      cancel: () => finish({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'the call was cancelled' }], isError: true } }),
     }
     const timer = setInterval(() => {
       entry.progress += 1
@@ -127,15 +137,23 @@ export class LoopbackMcp {
     }, KEEPALIVE_MS)
     timer.unref?.()
     this.calls.set(callId, entry)
-    this.onCall({ name: params?.name, arguments: params?.arguments ?? {}, callId })
+    this.onCall({ name: params?.name, arguments: params?.arguments ?? {}, callId, signal: abortController.signal })
       .then(entry.settle, error => entry.settle({ isError: true, text: error?.message ?? String(error) }))
   }
 }
 
 const readBody = (request) => new Promise((resolve, reject) => {
   let body = ''
+  let bytes = 0
   request.setEncoding('utf8')
-  request.on('data', chunk => { body += chunk })
+  request.on('data', (chunk) => {
+    bytes += Buffer.byteLength(chunk)
+    if (bytes > MAX_BODY_BYTES) {
+      request.destroy(new Error('MCP request body too large'))
+      return
+    }
+    body += chunk
+  })
   request.on('end', () => resolve(body))
   request.on('error', reject)
 })
