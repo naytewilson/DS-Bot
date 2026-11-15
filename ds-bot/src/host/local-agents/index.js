@@ -139,6 +139,12 @@ export function install(rt) {
   void scan()
   // Custom agents arrive with the state load; their routes register then too.
   void rt.load?.().then(() => applyRoutes()).catch(() => {})
+  rt.terminateGovernedTurn = (sessionId, reason, { disposed = false } = {}) => {
+    const live = adapter.live.get(String(sessionId))
+    if (live === undefined) return
+    if (!disposed && !live.governed && live.state !== 'suspended') return
+    void adapter.terminateSession(sessionId, reason, { forceKill: true })
+  }
   // The callback returns the disposer: running adapter.dispose() inside the
   // setup would leave the adapter disposed from the moment it installs.
   ctx.effect(() => () => {

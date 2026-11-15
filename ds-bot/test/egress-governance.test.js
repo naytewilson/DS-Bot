@@ -14,6 +14,7 @@ import {
   OWNER_SECRET_EXACT,
   ATTRIBUTION_KEYS,
   createEgressController,
+  install as installEgress,
   scrubOwnerTokens,
   validateLeaseGrant,
   workDepthOf,
@@ -820,4 +821,206 @@ test('authority-only mode rejects foreign ns1_ grants and AcpEngine/CodexEngine 
   assert.equal(codexSpawns[1].env.ANVIL_TASK_ID, 'task-codex')
   assert.equal(codexSpawns[1].env.ANVIL_AGENT, 'dsh:chief')
   assert.equal(codexSpawns[1].env.ANVIL_OWNER_TOKEN, undefined)
+})
+
+test('host pre-step blocked turn/end and agent/disposed tear down suspended tool-calls CLI PGID, LoopbackMcp, and slot without calling stream()', async (t) => {
+  const { install: installLocalAgents } = await import('../src/host/local-agents/index.js')
+  const dir = mkdtempSync(join(tmpdir(), 'dsb-prestep-blocked-'))
+  const pidFile = join(dir, 'pids.json')
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+
+  let registeredAdapter
+  const ctx = fakeContext({
+    services: {
+      agents: new Map([['s-prestep', { id: 's-prestep', session: { id: 's-prestep', header: { cwd: dir } } }]]),
+      anvilBridge: { status: agent => ({ session_ref: `ns1_${agent.id}` }) },
+      anvilAuthority: { async admit({ session_ref }) { return validGrant(session_ref, 's-prestep') } },
+    },
+  })
+  ctx.llm = {
+    registerAdapter(_routes, adapter) {
+      registeredAdapter = adapter
+      return Object.assign(() => {}, { replace: () => {} })
+    },
+  }
+  ctx.agents = ctx.get('agents')
+  const rt = {
+    ctx,
+    warn: () => {},
+    save: async () => {},
+    load: async () => {},
+    selfOf: id => id,
+    botOf: id => ({ id, name: 'AcpBot', permission: 'workspace-write' }),
+    roomOf: () => undefined,
+    groupOwners: new Map(),
+    resolveAgent: async id => ctx.agents.get(id),
+    teamFolder: () => dir,
+    teamTools: [{ name: 'list_bots' }],
+    config: {},
+    state: {
+      bots: { 's-prestep': { id: 's-prestep', name: 'AcpBot', model: 'local-acp-probe/default', permission: 'workspace-write' } },
+      works: {},
+      localAgents: {
+        custom: [{ id: 'probe', name: 'Probe ACP', command: process.execPath, args: [PROBE_CLI, '--spawn-orphan', '--pid-out', pidFile] }],
+        sessions: {},
+      },
+    },
+  }
+  installEgress(rt)
+  installLocalAgents(rt)
+  assert.ok(registeredAdapter, 'expected local-agents adapter to register')
+  t.after(() => registeredAdapter.dispose())
+
+  const turn1 = await collect(registeredAdapter.stream({
+    provider: 'local-acp-probe',
+    model: 'default',
+    sessionId: 's-prestep',
+    messages: [userMsg('m1', 'call-tool')],
+    tools: [{ name: 'list_bots', description: 'List bots', parameters: {} }],
+    signal: AbortSignal.timeout(10_000),
+  }))
+  assert.equal(turn1.finish?.kind, 'tool-calls')
+
+  const pids = await waitUntil(() => (existsSync(pidFile) ? JSON.parse(readFileSync(pidFile, 'utf8')) : null), { message: 'prestep pids missing' })
+  assert.equal(isPidAlive(pids.parentPid), true)
+  assert.equal(isPidAlive(pids.orphanPid), true)
+  const mcpServer = registeredAdapter.live.get('s-prestep')?.mcp?.server
+  assert.equal(mcpServer?.listening, true)
+  assert.equal(rt.egress.activeChildCount(), 1)
+
+  // Simulate dsh-anvil-bridge rejecting Step 2 at agent/pre-step -> dsh-agent-loop emits turn/end { reason: { kind: 'blocked' } } without calling stream().
+  for (const fn of ctx.listeners.get('session/event') ?? []) {
+    fn({ id: 's-prestep' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'blocked' } } })
+  }
+
+  await waitUntil(() => registeredAdapter.live.size === 0, { message: 'suspended live session survived blocked turn/end' })
+  assert.equal(rt.egress.activeChildCount(), 0, 'concurrency slot survived blocked turn/end')
+  assert.equal(mcpServer?.listening, false, 'LoopbackMcp survived blocked turn/end')
+  await waitUntil(() => !isPidAlive(pids.parentPid), { message: 'CLI parent survived blocked turn/end' })
+  if (process.platform !== 'win32') {
+    await waitUntil(() => !isPidAlive(pids.orphanPid), { message: 'CLI PGID survived blocked turn/end' })
+  } else {
+    try { process.kill(pids.orphanPid, 'SIGKILL') } catch { /* already gone */ }
+  }
+})
+
+test('post-turn memory-review gates botShot through governed egress.admit and fails closed with zero LLM calls on revoked or unresolvable sessions', async (t) => {
+  const { writeFileSync } = await import('node:fs')
+  const { createRuntime } = await import('../index.js')
+  const home = mkdtempSync(join(tmpdir(), 'dsb-memreview-gov-'))
+  t.after(() => rmSync(home, { recursive: true, force: true }))
+
+  writeFileSync(join(home, 'state.json'), JSON.stringify({
+    version: 1,
+    mainBotIds: ['m1'],
+    revision: 1,
+    whaleStored: true,
+    bots: {
+      m1: { id: 'm1', sessionId: 'm1', name: 'Chief', role: 'Chief of Staff', model: 'deepseek/v4', instructions: '', createdAt: 1 },
+      b2: { id: 'b2', sessionId: 'b2', name: 'Writer', role: 'Writer', model: 'deepseek/v4', instructions: '', createdAt: 2 },
+    },
+    rooms: {},
+    exchanges: [],
+    exchangeTurns: {},
+    questions: {},
+  }))
+
+  const history = [
+    { event: { seq: 20, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'I prefer concise bullet summaries.' }] } } },
+    { event: { seq: 21, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'Noted.' }] } } } },
+  ]
+  const agentsMap = new Map([
+    ['m1', { id: 'm1', session: { id: 'm1', seq: 22 } }],
+    ['b2', { id: 'b2', session: { id: 'b2', seq: 22 } }],
+  ])
+  let allowAdmit = false
+  const admitCalls = []
+  const requests = []
+  const replies = []
+
+  const ctx = fakeContext({
+    services: {
+      agents: agentsMap,
+      anvilBridge: { status: agent => ({ session_ref: `ns1_${agent.id}` }) },
+      anvilAuthority: {
+        async admit(payload) {
+          admitCalls.push(payload)
+          if (!allowAdmit) throw new EgressDeniedError('ANVIL admission denied: lease revoked')
+          return validGrant(payload.session_ref, payload.session_ref.slice(4))
+        },
+      },
+    },
+  })
+  Object.assign(ctx, {
+    llm: {
+      listProviders: () => [{ id: 'deepseek', name: 'DeepSeek' }],
+      listModels: async () => [{ id: 'v4' }],
+      resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'off' }] } }),
+      async* stream(request) {
+        requests.push(request)
+        const text = replies.shift() ?? '{"changes":[]}'
+        yield { type: 'text-delta', index: 0, text }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    },
+    sessionController: {
+      resolveAgent: async sessionId => {
+        const agent = agentsMap.get(sessionId)
+        if (!agent) throw new Error(`unknown session ${sessionId}`)
+        return { agent }
+      },
+      selectModel: async () => {},
+      page: async ({ beforeSeq, maxMessages }) => {
+        const all = history.filter(record => beforeSeq === undefined || record.event.seq < beforeSeq)
+        const records = maxMessages === undefined ? all : all.slice(-maxMessages)
+        return { records, hasMore: records.length < all.length }
+      },
+    },
+    sessions: { messageProjections: [] },
+    workspaceRegistry: { archiveSession: async () => {} },
+  })
+
+  let route
+  const origRegister = ctx.connection.fetch.register
+  ctx.connection.fetch.register = (options) => {
+    route = options
+    return origRegister(options)
+  }
+  createRuntime(ctx, { home, memoryReviewDelayMs: 5 })
+  t.after(() => ctx.dispose())
+
+  const callState = async () => {
+    const res = await route.fetch(new Request('http://localhost/api/bot', { method: 'POST', body: JSON.stringify({ endpoint: 'state', payload: {} }) }))
+    return (await res.json()).value
+  }
+  const waitForReviews = async () => waitUntil(async () => (await callState()).memoryReviews === 0, { timeoutMs: 5_000, message: 'memoryReviews did not drain' })
+
+  // 1) Lease revoked between turn completion and delayed memory-review -> 0 LLM calls.
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'running' })
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'idle' })
+  await waitUntil(() => admitCalls.length >= 1, { timeoutMs: 3_000, message: 'memory-review did not check admit' })
+  await waitForReviews()
+  assert.equal(admitCalls[0].purpose, 'memory-review')
+  assert.equal(admitCalls[0].target, 'chat:b2')
+  assert.equal(requests.length, 0, 'revoked memory-review must not invoke ctx.llm.stream')
+  assert.equal(existsSync(join(home, 'memory', 'bots', 'b2', 'MEMORY.md')), false)
+
+  // 2) Unresolvable live agent -> fails closed cleanly with 0 LLM calls.
+  agentsMap.delete('b2')
+  allowAdmit = true
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'running' })
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'idle' })
+  await new Promise(r => setTimeout(r, 40))
+  await waitForReviews()
+  assert.equal(requests.length, 0, 'unresolvable memory-review must not invoke ctx.llm.stream')
+
+  // 3) Restored valid lease -> memory-review admits and reviews the preserved unread lines.
+  agentsMap.set('b2', { id: 'b2', session: { id: 'b2', seq: 22 } })
+  replies.push('```json\n{"changes":[{"op":"add","text":"The user prefers concise bullet summaries"}]}\n```')
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'running' })
+  ctx.emit('agent/status', { agent: { id: 'b2' }, status: 'idle' })
+  await waitUntil(() => requests.length === 1, { timeoutMs: 3_000, message: 'admitted memory-review did not run botShot' })
+  await waitForReviews()
+  const saved = readFileSync(join(home, 'memory', 'bots', 'b2', 'MEMORY.md'), 'utf8')
+  assert.match(saved, /The user prefers concise bullet summaries/)
 })

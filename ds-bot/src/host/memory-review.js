@@ -288,6 +288,13 @@ export function installReview(rt, memory) {
     }
     // Only the user's words are kept, so lines without any need no model call.
     if (read.some(line => line.who === 'user')) {
+      if (rt.egress?.isGoverned?.()) {
+        const sessionId = typeof rt.chatOf === 'function' ? rt.chatOf(keeper.id) : undefined
+        if (sessionId === undefined || typeof rt.egress.admit !== 'function') {
+          throw new Error('ANVIL admission denied: unresolvable keeper session for memory review')
+        }
+        await rt.egress.admit({ sessionId, purpose: 'memory-review', detail: { target: key } })
+      }
       const { homeFiles, teamFiles } = await settled(() => ({ homeFiles: loadScope(home), teamFiles: loadScope(TEAM) }))
       const said = read.filter(line => line.who === 'user').map(line => line.text).join('\n')
       const tagged = group ? 'group' : 'own'

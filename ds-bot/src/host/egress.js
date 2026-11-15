@@ -357,5 +357,20 @@ export function install(rt) {
   const controller = createEgressController(rt)
   rt.egress = controller
   rt.admitEgress = options => controller.admit(options)
-  rt.ctx?.effect?.(() => () => { void controller.terminateAll('ds-bot egress disposed') }, 'ds-bot: egress')
+  const offEvent = rt.ctx?.on?.('session/event', (session, event) => {
+    if (event?.type !== 'turn/end') return
+    const kind = event?.data?.reason?.kind
+    if (kind !== 'blocked' && kind !== 'aborted' && kind !== 'error') return
+    const sid = session?.id
+    if (sid !== undefined) rt.terminateGovernedTurn?.(sid, `turn ended (${kind})`, { disposed: false })
+  })
+  const offDisposed = rt.ctx?.on?.('agent/disposed', ({ agent } = {}) => {
+    const sid = agent?.session?.id ?? agent?.id
+    if (sid !== undefined) rt.terminateGovernedTurn?.(sid, 'agent disposed', { disposed: true })
+  })
+  rt.ctx?.effect?.(() => () => {
+    offEvent?.()
+    offDisposed?.()
+    void controller.terminateAll('ds-bot egress disposed')
+  }, 'ds-bot: egress')
 }
